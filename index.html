@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta id="theme-color" name="theme-color" content="#f4f4f5" />
+    <meta
+      name="description"
+      content="快速粘贴编号并生成条码，支持批量处理、离线使用和添加到主屏幕。"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="条码工作台" />
+    <link rel="icon" href="/barcode/icons/app-icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/barcode/icons/apple-touch-icon.png" />
+    <title>欧阳骏条码工作台</title>
+    <script>
+      (() => {
+        const saved = localStorage.getItem("barcode-theme") || "system";
+        const dark =
+          saved === "dark" ||
+          (saved === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        const resolved = dark ? "dark" : "light";
+        document.documentElement.classList.add(resolved);
+        document.documentElement.dataset.theme = resolved;
+        document.querySelector("#theme-color")?.setAttribute(
+          "content",
+          dark ? "#050505" : "#f4f4f5",
+        );
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>此工具需要启用 JavaScript 才能生成条码。</noscript>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
