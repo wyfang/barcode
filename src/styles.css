@@ -609,7 +609,7 @@ button {
   gap: 4px;
 }
 
-.mobile-settings-button {
+.mobile-bottom-toolbar {
   display: none;
 }
 
@@ -1023,6 +1023,7 @@ button {
 
 .inspector-download-button {
   justify-content: flex-start;
+  height: 34px;
   min-height: 34px;
   padding-inline: 10px;
   gap: 7px;
@@ -1526,35 +1527,84 @@ button {
   text-align: right;
 }
 
-.mobile-settings-drawer {
-  max-width: min(360px, 92vw);
-}
-
 .toast-region--bottom {
   bottom: calc(60px + env(safe-area-inset-bottom));
 }
 
-.app-shell .button {
+.button {
   border-radius: var(--app-form-radius);
 }
 
-.app-shell .button--sm {
+.button--sm {
   font-size: var(--app-font-caption);
   line-height: 1;
 }
 
-.app-shell .button--primary {
+.button--primary {
   color: var(--app-on-primary);
   background: var(--app-primary);
 }
 
-.app-shell .button--secondary {
+.button--secondary {
   color: var(--app-text);
   background: var(--app-control);
 }
 
-.app-shell .chip {
+.chip {
   border-radius: 4px;
+}
+
+.mobile-settings-sheet {
+  width: 100%;
+  max-width: none;
+  max-height: min(78dvh, 720px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border-strong);
+  border-bottom: 0;
+  border-radius: var(--app-radius) var(--app-radius) 0 0;
+  color: var(--app-text);
+  background: var(--app-panel);
+}
+
+.mobile-settings-sheet .drawer__handle {
+  padding: 7px 0 3px;
+}
+
+.mobile-settings-sheet-header {
+  display: flex;
+  min-height: 38px;
+  padding: 0 8px 4px 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-direction: row;
+  gap: 8px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.mobile-settings-sheet-header .drawer__heading {
+  font-size: var(--app-font-heading);
+  font-weight: 650;
+}
+
+.mobile-settings-sheet-header .button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.mobile-settings-sheet-body {
+  margin: 0;
+  padding: 0;
+  color: var(--app-text);
+}
+
+.mobile-settings-sheet .inspector-download-footer {
+  width: 100%;
+  margin-top: 0;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
 }
 
 @keyframes barcode-crossfade {
@@ -1599,6 +1649,10 @@ button {
 }
 
 @media (max-width: 980px) {
+  .app-stage {
+    padding-bottom: calc(62px + env(safe-area-inset-bottom));
+  }
+
   .quick-workspace {
     grid-template-columns: minmax(280px, 320px) minmax(360px, 1fr);
   }
@@ -1607,8 +1661,40 @@ button {
     display: none;
   }
 
-  .mobile-settings-button {
-    display: inline-flex;
+  .mobile-bottom-toolbar {
+    position: fixed;
+    z-index: 45;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    min-height: calc(54px + env(safe-area-inset-bottom));
+    padding: 8px max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
+    align-items: center;
+    gap: 6px;
+    border-top: 1px solid var(--app-border);
+    background: var(--app-panel);
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.08);
+  }
+
+  .mobile-bottom-settings-button {
+    min-width: 74px;
+    height: 34px;
+    min-height: 34px;
+    padding-inline: 10px;
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+
+  .mobile-bottom-download {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mobile-bottom-toolbar .inspector-download-button kbd {
+    display: none;
   }
 
 }
@@ -1640,7 +1726,7 @@ button {
   }
 
   .app-stage {
-    padding: 6px;
+    padding: 6px 6px calc(60px + env(safe-area-inset-bottom));
   }
 
   .quick-workspace {

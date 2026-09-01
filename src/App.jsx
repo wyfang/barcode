@@ -24,6 +24,7 @@ import {
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   ClipboardPaste,
   Download,
   FileSpreadsheet,
@@ -1548,16 +1549,6 @@ function QuickGenerator() {
                 {selectedRecord.index + 1} · {selectedRecord.value}
               </span>
             )}
-            <Button
-              isIconOnly
-              aria-label="打开属性"
-              className="mobile-settings-button"
-              size="sm"
-              variant="ghost"
-              onPress={() => setSettingsOpen(true)}
-            >
-              <Settings2 size={15} />
-            </Button>
           </div>
         </header>
         <div className="canvas-stage">
@@ -1599,14 +1590,50 @@ function QuickGenerator() {
         </footer>
       </Surface>
 
+      <footer className="mobile-bottom-toolbar">
+        <Button
+          aria-controls="mobile-settings-sheet"
+          aria-expanded={settingsOpen}
+          className="mobile-bottom-settings-button"
+          size="sm"
+          variant="secondary"
+          onPress={() => setSettingsOpen(true)}
+        >
+          <Settings2 aria-hidden="true" size={15} />
+          <span>属性</span>
+        </Button>
+        <div className="mobile-bottom-download">
+          <DownloadActionButton
+            count={downloadableRecords.length}
+            enterAction={enterAction}
+            exporting={exporting}
+            onPress={() =>
+              downloadableRecords.length > 1 ? exportAll() : exportOne()
+            }
+          />
+        </div>
+      </footer>
+
       <Drawer.Backdrop isOpen={settingsOpen} onOpenChange={setSettingsOpen}>
-        <Drawer.Content placement="right">
-          <Drawer.Dialog className="compact-drawer mobile-settings-drawer">
-            <Drawer.CloseTrigger />
-            <Drawer.Header>
+        <Drawer.Content placement="bottom">
+          <Drawer.Dialog
+            className="mobile-settings-sheet"
+            id="mobile-settings-sheet"
+          >
+            <Drawer.Handle />
+            <Drawer.Header className="mobile-settings-sheet-header">
               <Drawer.Heading>属性</Drawer.Heading>
+              <Button
+                isIconOnly
+                aria-label="收起属性"
+                size="sm"
+                slot="close"
+                variant="ghost"
+              >
+                <ChevronDown aria-hidden="true" size={16} />
+              </Button>
             </Drawer.Header>
-            <Drawer.Body>
+            <Drawer.Body className="mobile-settings-sheet-body">
               <InspectorControls
                 clearAfterDownload={clearAfterDownload}
                 downloadFormat={downloadFormat}
