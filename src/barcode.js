@@ -1,6 +1,11 @@
 import JsBarcode from "jsbarcode";
 
 export const EXPORT_PPI = 300;
+export const BARCODE_CORNER_RADIUS = 4;
+
+const BARCODE_FONT_FAMILY = 'Inter, "SF Pro Display", "Segoe UI", Arial, sans-serif';
+const BARCODE_FONT_WEIGHT = 500;
+const BARCODE_TEXT_MARGIN = 8;
 
 export const DEFAULT_SETTINGS = Object.freeze({
   background: "#ffffff",
@@ -11,30 +16,70 @@ export const DEFAULT_SETTINGS = Object.freeze({
   height: 92,
   lineColor: "#101828",
   margin: 16,
+  textColor: "#101828",
 });
 
-function barcodeOptions(settings, width) {
+function barcodeOptions(
+  settings,
+  width,
+  displayValue = settings.displayValue,
+) {
   return {
     background: settings.background,
-    displayValue: settings.displayValue,
-    font: 'Inter, "SF Pro Display", "Segoe UI", Arial, sans-serif',
-    fontOptions: "500",
+    displayValue,
+    font: BARCODE_FONT_FAMILY,
+    fontOptions: String(BARCODE_FONT_WEIGHT),
     fontSize: Number(settings.fontSize),
     format: "CODE128",
     height: Number(settings.height),
     lineColor: settings.lineColor,
     margin: Number(settings.margin),
-    textMargin: 8,
+    textMargin: BARCODE_TEXT_MARGIN,
     width,
   };
 }
 
+function fittedTextSize(value, desiredSize, availableWidth) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return desiredSize;
+
+  context.font = `${BARCODE_FONT_WEIGHT} ${desiredSize}px ${BARCODE_FONT_FAMILY}`;
+  const measuredWidth = context.measureText(value).width;
+  if (!(measuredWidth > availableWidth)) return desiredSize;
+  return Math.max(0.5, (desiredSize * availableWidth) / measuredWidth);
+}
+
+function appendBarcodeText(svg, value, settings, sourceWidth) {
+  if (!settings.displayValue) return;
+
+  const margin = Number(settings.margin);
+  const desiredSize = Number(settings.fontSize);
+  const availableWidth = Math.max(1, sourceWidth - margin * 2);
+  const fontSize = fittedTextSize(value, desiredSize, availableWidth);
+  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  text.setAttribute("x", String(sourceWidth / 2));
+  text.setAttribute(
+    "y",
+    String(margin + Number(settings.height) + BARCODE_TEXT_MARGIN + fontSize),
+  );
+  text.setAttribute("fill", settings.textColor || settings.lineColor);
+  text.setAttribute("font-family", BARCODE_FONT_FAMILY);
+  text.setAttribute("font-size", String(fontSize));
+  text.setAttribute("font-weight", String(BARCODE_FONT_WEIGHT));
+  text.setAttribute("text-anchor", "middle");
+  text.textContent = value;
+  svg.appendChild(text);
+}
+
 function createSvgElement(value, settings = DEFAULT_SETTINGS) {
+  const heightProbe = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   const firstProbe = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   const secondProbe = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  JsBarcode(firstProbe, value, barcodeOptions(settings, 1));
-  JsBarcode(secondProbe, value, barcodeOptions(settings, 2));
-  const sourceHeight = Number.parseFloat(firstProbe.getAttribute("height"));
+  JsBarcode(heightProbe, value, barcodeOptions(settings, 1));
+  JsBarcode(firstProbe, value, barcodeOptions(settings, 1, false));
+  JsBarcode(secondProbe, value, barcodeOptions(settings, 2, false));
+  const sourceHeight = Number.parseFloat(heightProbe.getAttribute("height"));
   const firstWidth = Number.parseFloat(firstProbe.getAttribute("width"));
   const secondWidth = Number.parseFloat(secondProbe.getAttribute("width"));
   const widthPerUnit = secondWidth - firstWidth;
@@ -47,19 +92,33 @@ function createSvgElement(value, settings = DEFAULT_SETTINGS) {
   const fixedWidth = firstWidth - widthPerUnit;
   const targetSourceWidth = (exportWidthCm / exportHeightCm) * sourceHeight;
   const sourceBarWidth = Math.max(
-    0.01,
+    0.001,
     (targetSourceWidth - fixedWidth) / widthPerUnit,
   );
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  JsBarcode(svg, value, barcodeOptions(settings, sourceBarWidth));
-  const naturalWidth = Number.parseFloat(svg.getAttribute("width"));
-  const naturalHeight = Number.parseFloat(svg.getAttribute("height"));
-  if (!(naturalWidth > 0) || !(naturalHeight > 0)) {
+  JsBarcode(svg, value, barcodeOptions(settings, sourceBarWidth, false));
+  const generatedWidth = Number.parseFloat(svg.getAttribute("width"));
+  if (!(generatedWidth > 0)) {
     throw new Error("无法读取条码尺寸");
   }
-  svg.setAttribute("viewBox", `0 0 ${naturalWidth} ${naturalHeight}`);
+  const backgroundRect = svg.querySelector(":scope > rect");
+  if (backgroundRect) {
+    backgroundRect.setAttribute("width", String(targetSourceWidth));
+    backgroundRect.setAttribute("height", String(sourceHeight));
+    const radius = Math.min(
+      BARCODE_CORNER_RADIUS,
+      targetSourceWidth / 2,
+      sourceHeight / 2,
+    );
+    backgroundRect.setAttribute("rx", String(radius));
+    backgroundRect.setAttribute("ry", String(radius));
+    svg.style.borderRadius = `${radius}px`;
+    svg.style.overflow = "hidden";
+  }
+  appendBarcodeText(svg, value, settings, targetSourceWidth);
+  svg.setAttribute("viewBox", `0 0 ${targetSourceWidth} ${sourceHeight}`);
   svg.setAttribute("width", `${targetSourceWidth}px`);
-  svg.setAttribute("height", `${naturalHeight}px`);
+  svg.setAttribute("height", `${sourceHeight}px`);
   svg.setAttribute("preserveAspectRatio", "none");
   return svg;
 }
@@ -301,16 +360,16 @@ export async function downloadRecord(
 
 export async function downloadRecords(
   records,
+  format = "png",
   exportHeightCm = DEFAULT_SETTINGS.exportHeightCm,
   exportWidthCm = DEFAULT_SETTINGS.exportWidthCm,
 ) {
   const filenames = [];
 
   for (const record of records) {
-    const blob = await svgToPngBlob(record.svg, exportHeightCm, exportWidthCm);
-    const filename = `${safeFilename(record.value)}.png`;
-    downloadBlob(blob, filename);
-    filenames.push(filename);
+    filenames.push(
+      await downloadRecord(record, format, exportHeightCm, exportWidthCm),
+    );
   }
 
   return filenames;

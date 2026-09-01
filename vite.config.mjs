@@ -7,10 +7,41 @@ import { VitePWA } from "vite-plugin-pwa";
 
 const barcodeRoot = path.dirname(fileURLToPath(import.meta.url));
 
+function devServiceWorkerCleanup() {
+  return {
+    name: "barcode-dev-service-worker-cleanup",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const pathname = (request.url || "").split("?", 1)[0];
+        if (pathname !== "/barcode/sw.js") return next();
+
+        response.statusCode = 200;
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("Content-Type", "application/javascript; charset=utf-8");
+        response.setHeader("Service-Worker-Allowed", "/barcode/");
+        response.end(`
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    self.registration.unregister().then(() =>
+      self.clients.matchAll({ type: "window" }).then((clients) =>
+        Promise.all(clients.map((client) => client.navigate(client.url))),
+      ),
+    ),
+  );
+});
+`);
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "/barcode/",
   root: barcodeRoot,
   plugins: [
+    devServiceWorkerCleanup(),
     react(),
     tailwindcss(),
     VitePWA({
@@ -63,13 +94,13 @@ export default defineConfig({
           },
         ],
       },
-      registerType: "prompt",
+      registerType: "autoUpdate",
       workbox: {
         cleanupOutdatedCaches: true,
-        clientsClaim: false,
+        clientsClaim: true,
         globPatterns: ["**/*.{html,js,css,svg,png,woff2}"],
         navigateFallback: "/barcode/index.html",
-        skipWaiting: false,
+        skipWaiting: true,
       },
     }),
   ],

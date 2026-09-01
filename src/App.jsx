@@ -1,6 +1,9 @@
 import {
   Button,
+  ColorArea,
   ColorField,
+  ColorPicker,
+  ColorSlider,
   ColorSwatch,
   Drawer,
   Label,
@@ -26,7 +29,6 @@ import {
   FileSpreadsheet,
   HelpCircle,
   LoaderCircle,
-  RefreshCw,
   Settings2,
   Share2,
   Smartphone,
@@ -56,10 +58,14 @@ import {
 
 const THEME_ORDER = ["system", "light", "dark"];
 const ENTER_ACTIONS = ["newline", "download"];
+const DOWNLOAD_FORMATS = ["png", "svg"];
 const DOWNLOAD_RECORD_TTL = 60_000;
-const DOWNLOAD_RECORD_REMOVE_GRACE = 300;
+const DOWNLOAD_RECORD_COLLAPSE_DURATION = 320;
+const DOWNLOAD_RECORD_REMOVE_GRACE = DOWNLOAD_RECORD_COLLAPSE_DURATION + 80;
 const PREVIEW_SETTLE_DELAY = 160;
-const PREVIEW_TRANSITION_DURATION = 220;
+const PREVIEW_TRANSITION_DURATION = 360;
+const PWA_UPDATE_INTERVAL = 15 * 60_000;
+const INPUT_DRAFT_KEY = "barcode-input-draft-v1";
 const RECENT_DOWNLOADS_KEY = "barcode-recent-downloads-v1";
 const PREFERENCES_KEY = "barcode-workbench-preferences-v1";
 
@@ -90,6 +96,38 @@ function updateStoredPreferences(next) {
   }
 }
 
+function readInputDraft() {
+  try {
+    return sessionStorage.getItem(INPUT_DRAFT_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function removeInputRecords(input, downloadedRecords, removeMatchingValues = false) {
+  const downloadedIds = new Set(downloadedRecords.map((record) => record.id));
+  const downloadedValues = new Set(
+    downloadedRecords.map((record) => record.value),
+  );
+  let recordIndex = 0;
+
+  return input
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .split("\n")
+    .filter((line) => {
+      const value = line.trim();
+      if (!value) return true;
+      const recordId = `${recordIndex}-${value}`;
+      recordIndex += 1;
+      return removeMatchingValues
+        ? !downloadedValues.has(value)
+        : !downloadedIds.has(recordId);
+    })
+    .join("\n")
+    .replace(/^\n+|\n+$/g, "");
+}
+
 function readRecentDownloads() {
   try {
     const now = Date.now();
@@ -105,7 +143,7 @@ function readRecentDownloads() {
         typeof item.downloadedAt === "string" &&
         Number.isFinite(item.downloadedAtMs) &&
         Number.isFinite(item.expiresAt) &&
-        item.expiresAt > now,
+        item.expiresAt + DOWNLOAD_RECORD_REMOVE_GRACE > now,
     );
   } catch {
     return [];
@@ -113,11 +151,32 @@ function readRecentDownloads() {
 }
 
 function downloadRecordStyle(item) {
+  const lifecycleDuration =
+    DOWNLOAD_RECORD_TTL + DOWNLOAD_RECORD_COLLAPSE_DURATION;
   const age = Math.min(
-    DOWNLOAD_RECORD_TTL,
+    lifecycleDuration,
     Math.max(0, Date.now() - item.downloadedAtMs),
   );
-  return { "--download-record-delay": `-${age}ms` };
+  const collapseAge = Math.max(0, age - DOWNLOAD_RECORD_TTL);
+  const collapseDelay =
+    age < DOWNLOAD_RECORD_TTL
+      ? `${DOWNLOAD_RECORD_TTL - age}ms`
+      : `-${collapseAge}ms`;
+  return {
+    "--download-record-collapse-delay": collapseDelay,
+    "--download-record-collapse-duration": `${DOWNLOAD_RECORD_COLLAPSE_DURATION}ms`,
+    "--download-record-fade-delay": `-${Math.min(age, DOWNLOAD_RECORD_TTL)}ms`,
+    "--download-record-fade-duration": `${DOWNLOAD_RECORD_TTL}ms`,
+  };
+}
+
+function downloadRecordIndex(item) {
+  if (Number.isInteger(item.recordIndex) && item.recordIndex >= 0) {
+    return item.recordIndex;
+  }
+  const separatorIndex = item.recordId.indexOf("-");
+  const recordIndex = Number(item.recordId.slice(0, separatorIndex));
+  return Number.isInteger(recordIndex) && recordIndex >= 0 ? recordIndex : null;
 }
 
 function boundedNumber(value, min, max, fallback) {
@@ -125,10 +184,15 @@ function boundedNumber(value, min, max, fallback) {
   return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
 }
 
-function storedColor(value, fallback) {
-  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
-    ? value
-    : fallback;
+function storedColor(value, fallback, allowAlpha = false) {
+  if (typeof value !== "string") return fallback;
+  try {
+    const color = parseColor(value);
+    if (allowAlpha) return color.toString("css");
+    return color.withChannelValue("alpha", 1).toString("hex");
+  } catch {
+    return fallback;
+  }
 }
 
 function readGeneratorPreferences() {
@@ -160,21 +224,33 @@ function readGeneratorPreferences() {
     36,
     DEFAULT_SETTINGS.fontSize,
   );
+  const lineColor = storedColor(
+    barcode.lineColor,
+    DEFAULT_SETTINGS.lineColor,
+  );
 
   return {
     clearAfterDownload: stored.clearAfterDownload === true,
+    downloadFormat: DOWNLOAD_FORMATS.includes(stored.downloadFormat)
+      ? stored.downloadFormat
+      : "png",
     enterAction: ENTER_ACTIONS.includes(stored.enterAction)
       ? stored.enterAction
       : "newline",
     excludeDuplicates: stored.excludeDuplicates === true,
     settings: {
       ...DEFAULT_SETTINGS,
-      background: storedColor(barcode.background, DEFAULT_SETTINGS.background),
+      background: storedColor(
+        barcode.background,
+        DEFAULT_SETTINGS.background,
+        true,
+      ),
       displayValue,
       exportHeightCm,
       exportWidthCm,
       fontSize,
-      lineColor: storedColor(barcode.lineColor, DEFAULT_SETTINGS.lineColor),
+      lineColor,
+      textColor: storedColor(barcode.textColor, lineColor),
     },
   };
 }
@@ -229,13 +305,10 @@ function useThemePreference() {
 function ThemeTabs() {
   const { setTheme, theme } = useThemePreference();
   return (
-    <ToggleButtonGroup
+    <SegmentedControl
       aria-label="界面主题"
       className="theme-tabs"
-      disallowEmptySelection
       selectedKeys={new Set([theme])}
-      selectionMode="single"
-      size="sm"
       onSelectionChange={(keys) => {
         const nextTheme = [...keys][0];
         if (nextTheme) setTheme(String(nextTheme));
@@ -244,7 +317,19 @@ function ThemeTabs() {
       <ToggleButton id="system">自动</ToggleButton>
       <ToggleButton id="light">亮色</ToggleButton>
       <ToggleButton id="dark">暗色</ToggleButton>
-    </ToggleButtonGroup>
+    </SegmentedControl>
+  );
+}
+
+function SegmentedControl({ className = "", ...props }) {
+  return (
+    <ToggleButtonGroup
+      {...props}
+      className={["segmented-control", className].filter(Boolean).join(" ")}
+      disallowEmptySelection
+      selectionMode="single"
+      size="sm"
+    />
   );
 }
 
@@ -369,7 +454,7 @@ function InstallAppButton() {
 
 function PwaLifecycle() {
   const {
-    needRefresh: [needRefresh, setNeedRefresh],
+    needRefresh: [needRefresh],
     offlineReady: [offlineReady, setOfflineReady],
     updateServiceWorker,
   } = useRegisterSW({
@@ -382,26 +467,65 @@ function PwaLifecycle() {
     if (offlineReady) setOfflineReady(false);
   }, [offlineReady, setOfflineReady]);
 
-  if (!needRefresh) return null;
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+    let registration;
+    let reloadStarted = false;
 
-  return (
-    <aside className="update-banner" role="status">
-      <RefreshCw aria-hidden="true" size={15} />
-      <span>发现新版本</span>
-      <Button size="sm" onPress={() => updateServiceWorker(true)}>
-        更新
-      </Button>
-      <Button
-        isIconOnly
-        aria-label="稍后更新"
-        size="sm"
-        variant="ghost"
-        onPress={() => setNeedRefresh(false)}
-      >
-        ×
-      </Button>
-    </aside>
-  );
+    const reloadWhenControllerChanges = () => {
+      if (reloadStarted) return;
+      reloadStarted = true;
+      try {
+        const input = document.querySelector('[aria-label="编号内容"]');
+        if (input instanceof HTMLTextAreaElement) {
+          sessionStorage.setItem(INPUT_DRAFT_KEY, input.value);
+        }
+      } catch {
+        // Reload still proceeds when session storage is unavailable.
+      }
+      window.location.reload();
+    };
+
+    const checkForUpdate = async () => {
+      if (!navigator.onLine) return;
+      try {
+        registration ||= await navigator.serviceWorker.ready;
+        await registration.update();
+      } catch (error) {
+        console.error("PWA update check failed", error);
+      }
+    };
+    const checkWhenVisible = () => {
+      if (document.visibilityState === "visible") checkForUpdate();
+    };
+
+    checkForUpdate();
+    navigator.serviceWorker.addEventListener(
+      "controllerchange",
+      reloadWhenControllerChanges,
+    );
+    addEventListener("online", checkForUpdate);
+    document.addEventListener("visibilitychange", checkWhenVisible);
+    const intervalId = window.setInterval(checkForUpdate, PWA_UPDATE_INTERVAL);
+    return () => {
+      navigator.serviceWorker.removeEventListener(
+        "controllerchange",
+        reloadWhenControllerChanges,
+      );
+      removeEventListener("online", checkForUpdate);
+      document.removeEventListener("visibilitychange", checkWhenVisible);
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!needRefresh) return;
+    updateServiceWorker(true).catch((error) => {
+      console.error("PWA update failed", error);
+    });
+  }, [needRefresh, updateServiceWorker]);
+
+  return null;
 }
 
 function BrandMark() {
@@ -428,9 +552,9 @@ function HelpDrawer({ isOpen, onOpenChange }) {
               <h3>快速生成</h3>
               <ul>
                 <li>一行一个编号，输入或粘贴后自动生成 CODE128。</li>
-                <li>单条可下载 PNG 或 SVG；多条会逐个下载 PNG。</li>
+                <li>单条与多条都按“属性”中的文件格式逐个下载。</li>
                 <li>浏览器首次批量下载时，可能需要允许多个文件。</li>
-                <li>重复项默认保留，可在“属性”中排除。</li>
+                <li>“合并重复编号”开启后，同值输入会作为一个编号组处理。</li>
                 <li>不支持的字符会留在列表中，但不会进入下载。</li>
               </ul>
             </section>
@@ -442,8 +566,8 @@ function HelpDrawer({ isOpen, onOpenChange }) {
                   <dd>⌘ / Ctrl + Enter</dd>
                 </div>
                 <div>
-                  <dt>下载后清空输入</dt>
-                  <dd>下载完成后清空并重新聚焦输入框</dd>
+                  <dt>下载后移除输入</dt>
+                  <dd>下载完成后移除对应编号并重新聚焦输入框</dd>
                 </div>
               </dl>
             </section>
@@ -557,41 +681,58 @@ function usePreviewViewport(aspectRatio) {
   return { containerRef, size };
 }
 
-function BarcodePreview({ aspectRatio, record }) {
+function BarcodePreview({ aspectRatio, record, stackCount = 0 }) {
   const layers = usePreviewLayers(record);
   const normalizedAspectRatio = boundedNumber(aspectRatio, 0.3, 20, 2);
   const { containerRef, size } = usePreviewViewport(normalizedAspectRatio);
+  const backLayerCount = record
+    ? Math.max(0, Math.min(4, stackCount) - 1)
+    : 0;
 
   return (
     <div className="preview-frame" ref={containerRef}>
       <div
-        className="preview-viewport"
+        className="preview-stack"
+        data-count={backLayerCount + (record ? 1 : 0)}
         data-ready={size ? "true" : "false"}
         style={size ? { height: size.height, width: size.width } : undefined}
       >
-        {layers.previous && (
-          <PreviewBarcodeLayer
-            className="is-leaving"
-            key={`previous-${layers.previous.svg}`}
-            record={layers.previous}
-          />
-        )}
-        {layers.current ? (
-          <PreviewBarcodeLayer
-            className="is-entering"
-            key={`current-${layers.current.svg}`}
-            record={layers.current}
-          />
-        ) : (
-          <div className="preview-empty">
-            <div className="empty-barcode" aria-hidden="true">
-              {[2, 5, 3, 2, 7, 3, 5, 2, 4, 6, 2, 3].map((width, index) => (
-                <i key={`${width}-${index}`} style={{ width }} />
-              ))}
+        {Array.from({ length: backLayerCount }, (_, index) => {
+          const depth = backLayerCount - index;
+          return (
+            <span
+              aria-hidden="true"
+              className="preview-stack-card"
+              key={`stack-${depth}`}
+              style={{ "--stack-depth": depth }}
+            />
+          );
+        })}
+        <div className="preview-viewport">
+          {layers.previous && (
+            <PreviewBarcodeLayer
+              className="is-base"
+              key={`previous-${layers.previous.svg}`}
+              record={layers.previous}
+            />
+          )}
+          {layers.current ? (
+            <PreviewBarcodeLayer
+              className={layers.previous ? "is-revealing" : "is-current"}
+              key={`current-${layers.current.svg}`}
+              record={layers.current}
+            />
+          ) : (
+            <div className="preview-empty">
+              <div className="empty-barcode" aria-hidden="true">
+                {[2, 5, 3, 2, 7, 3, 5, 2, 4, 6, 2, 3].map((width, index) => (
+                  <i key={`${width}-${index}`} style={{ width }} />
+                ))}
+              </div>
+              <span>等待输入</span>
             </div>
-            <span>等待输入</span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -644,113 +785,215 @@ function CompactNumberField({
   );
 }
 
-function ColorSetting({ ariaLabel, value, onChange }) {
+function ColorSetting({
+  allowAlpha = false,
+  ariaLabel,
+  isDisabled = false,
+  value,
+  onChange,
+}) {
   const color = parseColor(value);
+  const alpha = Math.round(color.getChannelValue("alpha") * 100);
   return (
-    <ColorField
-      fullWidth
-      aria-label={ariaLabel}
-      className="compact-color-field"
+    <ColorPicker
+      className="compact-color-picker"
       value={color}
-      onChange={(nextColor) => onChange(nextColor.toString("hex"))}
+      onChange={(nextColor) =>
+        onChange(nextColor.toString(allowAlpha ? "css" : "hex"))
+      }
     >
-      <ColorField.Group fullWidth variant="secondary">
-        <ColorField.Prefix>
-          <ColorSwatch aria-label={`${ariaLabel}预览`} color={color} shape="square" size="sm" />
-        </ColorField.Prefix>
-        <ColorField.Input />
-      </ColorField.Group>
-    </ColorField>
+      <ColorPicker.Trigger
+        aria-label={`选择${ariaLabel}`}
+        className="compact-color-trigger"
+        isDisabled={isDisabled}
+        title={`选择${ariaLabel}`}
+      >
+        <ColorSwatch
+          aria-label={`${ariaLabel}预览`}
+          color={color}
+          shape="square"
+          size="sm"
+        />
+        <span className="compact-color-value">
+          {color.toString("hex")}
+        </span>
+        {allowAlpha && (
+          <span className="compact-color-alpha">{alpha}%</span>
+        )}
+      </ColorPicker.Trigger>
+      <ColorPicker.Popover
+        className="compact-color-popover"
+        placement="left top"
+      >
+        <ColorArea
+          aria-label={`${ariaLabel}色彩区域`}
+          className="compact-color-area"
+          colorSpace="hsb"
+          xChannel="saturation"
+          yChannel="brightness"
+        >
+          <ColorArea.Thumb />
+        </ColorArea>
+        <ColorSlider
+          aria-label={`${ariaLabel}色相`}
+          channel="hue"
+          className="compact-color-slider"
+          colorSpace="hsb"
+        >
+          <Label>色相</Label>
+          <ColorSlider.Output />
+          <ColorSlider.Track>
+            <ColorSlider.Thumb />
+          </ColorSlider.Track>
+        </ColorSlider>
+        {allowAlpha && (
+          <ColorSlider
+            aria-label={`${ariaLabel}透明度`}
+            channel="alpha"
+            className="compact-color-slider"
+            colorSpace="hsb"
+          >
+            <Label>透明度</Label>
+            <ColorSlider.Output />
+            <ColorSlider.Track>
+              <ColorSlider.Thumb />
+            </ColorSlider.Track>
+          </ColorSlider>
+        )}
+        <ColorField fullWidth aria-label={`${ariaLabel}颜色值`}>
+          <ColorField.Group fullWidth variant="secondary">
+            <ColorField.Prefix>
+              <ColorSwatch shape="square" size="xs" />
+            </ColorField.Prefix>
+            <ColorField.Input />
+          </ColorField.Group>
+        </ColorField>
+      </ColorPicker.Popover>
+    </ColorPicker>
   );
 }
 
 function InspectorControls({
   clearAfterDownload,
+  downloadFormat,
   excludeDuplicates,
   onClearAfterDownloadChange,
+  onDownloadFormatChange,
   onExcludeDuplicatesChange,
   onSettingsChange,
   settings,
 }) {
   return (
     <div className="inspector-controls">
-      <section className="inspector-section">
-        <Slider
-          aria-label="条码宽度（厘米）"
-          className="inspector-slider"
-          maxValue={20}
-          minValue={3}
-          step={0.1}
-          value={settings.exportWidthCm}
-          onChange={(value) => onSettingsChange({ exportWidthCm: Number(value) })}
-        >
-          <Label>条码宽度</Label>
-          <Slider.Output>{settings.exportWidthCm.toFixed(1)} cm</Slider.Output>
-          <Slider.Track>
-            <Slider.Fill />
-            <Slider.Thumb />
-          </Slider.Track>
-        </Slider>
-        <Slider
-          aria-label="条码高度（厘米）"
-          className="inspector-slider"
-          maxValue={10}
-          minValue={1}
-          step={0.1}
-          value={settings.exportHeightCm}
-          onChange={(value) => onSettingsChange({ exportHeightCm: Number(value) })}
-        >
-          <Label>条码高度</Label>
-          <Slider.Output>{settings.exportHeightCm.toFixed(1)} cm</Slider.Output>
-          <Slider.Track>
-            <Slider.Fill />
-            <Slider.Thumb />
-          </Slider.Track>
-        </Slider>
-        <SettingControl
-          label="文字大小"
-          value={settings.displayValue ? undefined : "已隐藏"}
-        >
-          <CompactNumberField
-            ariaLabel="条码文字大小"
-            isDisabled={!settings.displayValue}
-            maxValue={36}
-            minValue={10}
-            value={settings.fontSize}
-            onChange={(fontSize) => onSettingsChange({ fontSize })}
-          />
-        </SettingControl>
-        <div className="setting-grid">
-          <SettingControl label="条码颜色">
-            <ColorSetting
-              ariaLabel="条码颜色"
-              value={settings.lineColor}
-              onChange={(lineColor) => onSettingsChange({ lineColor })}
-            />
-          </SettingControl>
-          <SettingControl label="背景颜色">
-            <ColorSetting
-              ariaLabel="背景颜色"
-              value={settings.background}
-              onChange={(background) => onSettingsChange({ background })}
-            />
-          </SettingControl>
+      <section className="inspector-section inspector-section--appearance">
+        <div className="inspector-group">
+          <div className="inspector-group-label">条码</div>
+          <Slider
+            aria-label="条码宽度（厘米）"
+            className="inspector-slider"
+            maxValue={20}
+            minValue={3}
+            step={0.1}
+            value={settings.exportWidthCm}
+            onChange={(value) => onSettingsChange({ exportWidthCm: Number(value) })}
+          >
+            <Label>条码宽度</Label>
+            <Slider.Output>{settings.exportWidthCm.toFixed(1)} cm</Slider.Output>
+            <Slider.Track>
+              <Slider.Fill />
+              <Slider.Thumb />
+            </Slider.Track>
+          </Slider>
+          <Slider
+            aria-label="条码高度（厘米）"
+            className="inspector-slider"
+            maxValue={10}
+            minValue={1}
+            step={0.1}
+            value={settings.exportHeightCm}
+            onChange={(value) => onSettingsChange({ exportHeightCm: Number(value) })}
+          >
+            <Label>条码高度</Label>
+            <Slider.Output>{settings.exportHeightCm.toFixed(1)} cm</Slider.Output>
+            <Slider.Track>
+              <Slider.Fill />
+              <Slider.Thumb />
+            </Slider.Track>
+          </Slider>
+          <div className="setting-grid">
+            <SettingControl label="条码颜色">
+              <ColorSetting
+                ariaLabel="条码颜色"
+                value={settings.lineColor}
+                onChange={(lineColor) => onSettingsChange({ lineColor })}
+              />
+            </SettingControl>
+            <SettingControl label="背景颜色">
+              <ColorSetting
+                allowAlpha
+                ariaLabel="背景颜色"
+                value={settings.background}
+                onChange={(background) => onSettingsChange({ background })}
+              />
+            </SettingControl>
+          </div>
         </div>
-        <Switch
-          isSelected={settings.displayValue}
-          size="sm"
-          onChange={(selected) => onSettingsChange({ displayValue: selected })}
-        >
-          <Switch.Content>
-            <Switch.Control>
-              <Switch.Thumb />
-            </Switch.Control>
-            显示编号文字
-          </Switch.Content>
-        </Switch>
+
+        <div className="inspector-group">
+          <div className="inspector-group-label">编号文字</div>
+          <Switch
+            isSelected={settings.displayValue}
+            size="sm"
+            onChange={(selected) => onSettingsChange({ displayValue: selected })}
+          >
+            <Switch.Content>
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+              显示编号文字
+            </Switch.Content>
+          </Switch>
+          <div className="setting-grid">
+            <SettingControl
+              label="最大字号"
+              value={settings.displayValue ? undefined : "已隐藏"}
+            >
+              <CompactNumberField
+                ariaLabel="编号文字最大字号"
+                isDisabled={!settings.displayValue}
+                maxValue={36}
+                minValue={10}
+                value={settings.fontSize}
+                onChange={(fontSize) => onSettingsChange({ fontSize })}
+              />
+            </SettingControl>
+            <SettingControl label="文字颜色">
+              <ColorSetting
+                ariaLabel="编号文字颜色"
+                isDisabled={!settings.displayValue}
+                value={settings.textColor}
+                onChange={(textColor) => onSettingsChange({ textColor })}
+              />
+            </SettingControl>
+          </div>
+        </div>
       </section>
 
       <section className="inspector-section">
+        <SettingControl label="文件格式">
+          <SegmentedControl
+            fullWidth
+            aria-label="下载文件格式"
+            selectedKeys={new Set([downloadFormat])}
+            onSelectionChange={(keys) => {
+              const next = String([...keys][0] || "");
+              if (DOWNLOAD_FORMATS.includes(next)) onDownloadFormatChange(next);
+            }}
+          >
+            <ToggleButton id="png">PNG</ToggleButton>
+            <ToggleButton id="svg">SVG</ToggleButton>
+          </SegmentedControl>
+        </SettingControl>
         <div className="settings-switches">
           <Switch
             isSelected={clearAfterDownload}
@@ -761,7 +1004,7 @@ function InspectorControls({
               <Switch.Control>
                 <Switch.Thumb />
               </Switch.Control>
-              下载后清空输入
+              下载后移除输入
             </Switch.Content>
           </Switch>
           <Switch
@@ -773,7 +1016,7 @@ function InspectorControls({
               <Switch.Control>
                 <Switch.Thumb />
               </Switch.Control>
-              批量时排除重复项
+              合并重复编号
             </Switch.Content>
           </Switch>
         </div>
@@ -782,12 +1025,41 @@ function InspectorControls({
   );
 }
 
+function DownloadActionButton({
+  count,
+  enterAction,
+  exporting,
+  onPress,
+}) {
+  const isBatch = count > 1;
+  const shortcut = enterAction === "download" ? "Enter" : "⌘ / Ctrl + Enter";
+
+  return (
+    <Button
+      fullWidth
+      aria-label={`${isBatch ? `批量下载 ${count} 个条码` : "下载条码"}，快捷键 ${shortcut}`}
+      className="inspector-download-button"
+      isDisabled={!count}
+      isPending={exporting}
+      size="sm"
+      onPress={onPress}
+    >
+      <Download aria-hidden="true" size={15} />
+      <span>{isBatch ? `批量下载 (${count})` : "下载"}</span>
+      <kbd>{shortcut}</kbd>
+    </Button>
+  );
+}
+
 function QuickGenerator() {
   const [initialPreferences] = useState(readGeneratorPreferences);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(readInputDraft);
   const [settings, setSettings] = useState(initialPreferences.settings);
   const [clearAfterDownload, setClearAfterDownload] = useState(
     initialPreferences.clearAfterDownload,
+  );
+  const [downloadFormat, setDownloadFormat] = useState(
+    initialPreferences.downloadFormat,
   );
   const [enterAction, setEnterAction] = useState(initialPreferences.enterAction);
   const [excludeDuplicates, setExcludeDuplicates] = useState(
@@ -805,10 +1077,19 @@ function QuickGenerator() {
     updateStoredPreferences({
       barcode: settings,
       clearAfterDownload,
+      downloadFormat,
       enterAction,
       excludeDuplicates,
     });
-  }, [clearAfterDownload, enterAction, excludeDuplicates, settings]);
+  }, [clearAfterDownload, downloadFormat, enterAction, excludeDuplicates, settings]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(INPUT_DRAFT_KEY, input);
+    } catch {
+      // The current input remains available in memory when storage is unavailable.
+    }
+  }, [input]);
 
   useEffect(() => {
     try {
@@ -823,26 +1104,86 @@ function QuickGenerator() {
 
   useEffect(() => {
     if (!recentDownloads.length) return undefined;
-    const nextExpiry = Math.min(...recentDownloads.map((item) => item.expiresAt));
+    const nextRemoval = Math.min(
+      ...recentDownloads.map(
+        (item) => item.expiresAt + DOWNLOAD_RECORD_REMOVE_GRACE,
+      ),
+    );
     const timeoutId = window.setTimeout(() => {
       const now = Date.now();
       setRecentDownloads((current) =>
-        current.filter((item) => item.expiresAt > now),
+        current.filter(
+          (item) => item.expiresAt + DOWNLOAD_RECORD_REMOVE_GRACE > now,
+        ),
       );
-    }, Math.max(0, nextExpiry - Date.now()) + DOWNLOAD_RECORD_REMOVE_GRACE);
+    }, Math.max(0, nextRemoval - Date.now()));
     return () => window.clearTimeout(timeoutId);
   }, [recentDownloads]);
 
   const records = useMemo(() => parseBarcodeInput(input, settings), [input, settings]);
+  const valueCounts = useMemo(() => {
+    const counts = new Map();
+    for (const record of records) {
+      counts.set(record.value, (counts.get(record.value) || 0) + 1);
+    }
+    return counts;
+  }, [records]);
+  const displayRecords = useMemo(() => {
+    if (!excludeDuplicates) return records;
+    const seen = new Set();
+    return records.filter((record) => {
+      if (seen.has(record.value)) return false;
+      seen.add(record.value);
+      return true;
+    });
+  }, [excludeDuplicates, records]);
   const visibleRecords = useMemo(
-    () => records.filter((record) => !hiddenDownloadedIds.has(record.id)),
-    [hiddenDownloadedIds, records],
+    () => displayRecords.filter((record) => !hiddenDownloadedIds.has(record.id)),
+    [displayRecords, hiddenDownloadedIds],
   );
-  const validRecords = useMemo(() => records.filter((record) => record.valid), [records]);
+  const validRecords = useMemo(
+    () => displayRecords.filter((record) => record.valid),
+    [displayRecords],
+  );
   const visibleValidRecords = useMemo(
     () => visibleRecords.filter((record) => record.valid),
     [visibleRecords],
   );
+  const recordRows = useMemo(() => {
+    const latestDownloadByRecordId = new Map();
+    for (const item of recentDownloads) {
+      if (!latestDownloadByRecordId.has(item.recordId)) {
+        latestDownloadByRecordId.set(item.recordId, item);
+      }
+    }
+
+    const inlineDownloadIds = new Set();
+    const renderedValues = new Set();
+    const rows = [...displayRecords].reverse().flatMap((record) => {
+      renderedValues.add(record.value);
+      if (!hiddenDownloadedIds.has(record.id)) {
+        return [{ download: null, key: `record:${record.id}`, record }];
+      }
+
+      const download = latestDownloadByRecordId.get(record.id);
+      if (!download) return [];
+      inlineDownloadIds.add(download.id);
+      return [{ download, key: `record:${record.id}`, record }];
+    });
+
+    for (const download of recentDownloads) {
+      if (excludeDuplicates && renderedValues.has(download.value)) continue;
+      if (!inlineDownloadIds.has(download.id)) {
+        renderedValues.add(download.value);
+        rows.push({
+          download,
+          key: `download:${download.id}`,
+          record: null,
+        });
+      }
+    }
+    return rows;
+  }, [displayRecords, excludeDuplicates, hiddenDownloadedIds, recentDownloads]);
   const selectedRecord =
     visibleValidRecords.find((record) => record.id === selectedId) ||
     visibleValidRecords.at(-1) ||
@@ -867,12 +1208,18 @@ function QuickGenerator() {
     if (selectedId !== nextId) setSelectedId(nextId);
   }, [selectedId, selectedRecord]);
 
-  const finishDownload = () => {
+  const finishDownload = (downloadedRecords) => {
     window.setTimeout(() => {
       if (!inputRef.current) return;
       inputRef.current.focus();
       if (clearAfterDownload) {
-        setInput("");
+        setInput((current) =>
+          removeInputRecords(
+            current,
+            downloadedRecords,
+            excludeDuplicates,
+          ),
+        );
         setSelectedId(null);
         setHiddenDownloadedIds(new Set());
       }
@@ -896,32 +1243,46 @@ function QuickGenerator() {
         expiresAt: downloadedAtMs + DOWNLOAD_RECORD_TTL,
         format: format.toUpperCase(),
         id: createRecordInstanceId(),
+        mergedCount: excludeDuplicates
+          ? valueCounts.get(record.value) || 1
+          : 1,
         recordId: record.id,
+        recordIndex: record.index,
         value: record.value,
       }));
-    const downloadedRecordIds = entries.map((item) => item.recordId);
+    const downloadedValues = new Set(
+      downloadedRecords.map((record) => record.value),
+    );
+    const downloadedRecordIds = excludeDuplicates
+      ? records
+          .filter((record) => downloadedValues.has(record.value))
+          .map((record) => record.id)
+      : entries.map((item) => item.recordId);
     setHiddenDownloadedIds((current) =>
       new Set([...current, ...downloadedRecordIds]),
     );
     setRecentDownloads((current) => [
       ...entries,
-      ...current.filter((item) => item.expiresAt > downloadedAtMs),
+      ...current.filter(
+        (item) =>
+          item.expiresAt + DOWNLOAD_RECORD_REMOVE_GRACE > downloadedAtMs,
+      ),
     ]);
   };
 
-  const exportOne = async (format, remember = true) => {
-    if (!selectedRecord || exporting) return;
+  const exportOne = async (record = selectedRecord, remember = true) => {
+    if (!record || exporting) return;
     setExporting(true);
     try {
       const filename = await downloadRecord(
-        selectedRecord,
-        format,
+        record,
+        downloadFormat,
         settings.exportHeightCm,
         settings.exportWidthCm,
       );
-      if (remember) rememberDownloads([selectedRecord], format);
+      if (remember) rememberDownloads([record], downloadFormat);
       toast.success("已下载", { description: filename });
-      finishDownload();
+      finishDownload([record]);
     } catch (error) {
       toast.danger("下载失败", { description: error.message });
     } finally {
@@ -935,14 +1296,15 @@ function QuickGenerator() {
     try {
       const filenames = await downloadRecords(
         downloadableRecords,
+        downloadFormat,
         settings.exportHeightCm,
         settings.exportWidthCm,
       );
-      if (remember) rememberDownloads(downloadableRecords, "png");
+      if (remember) rememberDownloads(downloadableRecords, downloadFormat);
       toast.success("已发起批量下载", {
-        description: `${filenames.length} 个 PNG`,
+        description: `${filenames.length} 个 ${downloadFormat.toUpperCase()}`,
       });
-      finishDownload();
+      finishDownload(downloadableRecords);
     } catch (error) {
       toast.danger("批量下载失败", { description: error.message });
     } finally {
@@ -983,8 +1345,8 @@ function QuickGenerator() {
     const directDownload = enterAction === "download" && !event.shiftKey;
     if (shortcutDownload || directDownload) {
       event.preventDefault();
-      if (visibleValidRecords.length > 1) exportAll();
-      else exportOne("png");
+      if (downloadableRecords.length > 1) exportAll();
+      else exportOne();
     }
   };
 
@@ -995,9 +1357,49 @@ function QuickGenerator() {
     <>
       <div className="quick-workspace">
       <Surface className="dock-panel input-dock">
-        <header className="dock-header">
+        <header className="dock-header input-header">
           <strong>输入</strong>
-          <span>{records.length ? `${validRecords.length}/${records.length}` : "0"}</span>
+          <div className="input-header-tools">
+            <span className="input-count">
+              {records.length ? `${validRecords.length}/${records.length}` : "0"}
+            </span>
+            <Button
+              isIconOnly
+              aria-label="粘贴"
+              size="sm"
+              title="粘贴"
+              variant="ghost"
+              onPress={pasteFromClipboard}
+            >
+              <ClipboardPaste size={14} />
+            </Button>
+            <Button
+              isIconOnly
+              aria-label="导入 Excel"
+              size="sm"
+              title="导入 Excel"
+              variant="ghost"
+              onPress={() => setExcelOpen(true)}
+            >
+              <FileSpreadsheet size={14} />
+            </Button>
+            <Button
+              isIconOnly
+              aria-label="删除全部输入"
+              isDisabled={!input}
+              size="sm"
+              title="删除"
+              variant="ghost"
+              onPress={() => {
+                setInput("");
+                setSelectedId(null);
+                setHiddenDownloadedIds(new Set());
+                inputRef.current?.focus();
+              }}
+            >
+              <Trash2 size={14} />
+            </Button>
+          </div>
         </header>
 
         <div className="input-zone">
@@ -1018,66 +1420,81 @@ function QuickGenerator() {
             onKeyDown={handleKeyDown}
           />
           <div className="input-actions">
-            <div className="input-edit-actions">
-              <Button size="sm" variant="secondary" onPress={pasteFromClipboard}>
-                <ClipboardPaste size={15} />
-                粘贴
-              </Button>
-              <Button size="sm" variant="secondary" onPress={() => setExcelOpen(true)}>
-                <FileSpreadsheet size={14} />
-                Excel
-              </Button>
-              <Button
-                isDisabled={!input}
-                size="sm"
-                variant="ghost"
-                onPress={() => {
-                  setInput("");
-                  setSelectedId(null);
-                  setHiddenDownloadedIds(new Set());
-                  inputRef.current?.focus();
-                }}
-              >
-                <Trash2 size={14} />
-                清空
-              </Button>
-            </div>
-            <div className="enter-action">
-              <ToggleButtonGroup
-                aria-label="回车键行为"
-                disallowEmptySelection
-                selectedKeys={new Set([enterAction])}
-                selectionMode="single"
-                size="sm"
-                onSelectionChange={(keys) => {
-                  const next = [...keys][0];
-                  if (ENTER_ACTIONS.includes(String(next))) setEnterAction(String(next));
-                }}
-              >
-                <ToggleButton id="newline">回车换行</ToggleButton>
-                <ToggleButton id="download" title="Shift + Enter 仍可换行">
-                  <ToggleButtonGroup.Separator />
-                  回车下载
-                </ToggleButton>
-              </ToggleButtonGroup>
-            </div>
+            <SegmentedControl
+              aria-label="回车键行为"
+              className="enter-action-control"
+              selectedKeys={new Set([enterAction])}
+              onSelectionChange={(keys) => {
+                const next = [...keys][0];
+                if (ENTER_ACTIONS.includes(String(next))) setEnterAction(String(next));
+              }}
+            >
+              <ToggleButton id="newline">回车换行</ToggleButton>
+              <ToggleButton id="download">回车下载</ToggleButton>
+            </SegmentedControl>
+            <span className="enter-action-hint" aria-live="polite">
+              {enterAction === "download"
+                ? "换行：Shift + Enter"
+                : "下载：⌘ / Ctrl + Enter"}
+            </span>
           </div>
         </div>
 
         <div className="record-list" aria-label="条码记录列表" aria-live="polite">
-          {!visibleRecords.length && !recentDownloads.length && (
+          {!recordRows.length && (
             <span className="records-empty">
               {records.length ? "已全部处理" : "等待编号"}
             </span>
           )}
-          {[...visibleRecords].reverse().map((record) => {
+          {recordRows.map(({ download, key, record }) => {
+            if (download) {
+              const recordIndex = record?.index ?? downloadRecordIndex(download);
+              const mergedCount = Math.max(
+                1,
+                download.mergedCount || valueCounts.get(download.value) || 1,
+              );
+              return (
+                <div
+                  className="record-row is-downloaded"
+                  key={key}
+                  style={downloadRecordStyle(download)}
+                >
+                  <div className="record-content archived-download-content">
+                    <span className="record-index">
+                      {recordIndex === null ? "—" : recordIndex + 1}
+                    </span>
+                    <span className="record-text">
+                      <span className="record-value-line">
+                        <strong title={download.value}>{download.value}</strong>
+                        {mergedCount > 1 && (
+                          <span
+                            className="duplicate-count"
+                            title={`已合并 ${mergedCount} 行相同编号`}
+                          >
+                            ×{mergedCount}
+                          </span>
+                        )}
+                      </span>
+                      <small>
+                        已下载 · {download.format} · {download.downloadedAt}
+                      </small>
+                    </span>
+                  </div>
+                  <span className="record-downloaded-indicator" aria-hidden="true">
+                    <Check size={13} />
+                  </span>
+                </div>
+              );
+            }
+
+            const mergedCount = valueCounts.get(record.value) || 1;
             return (
               <div
                 className={`record-row ${selectedRecord?.id === record.id ? "is-selected" : ""} ${!record.valid ? "is-invalid" : ""}`}
-                key={record.id}
+                key={key}
               >
                 <Button
-                  className="record-select-button"
+                  className="record-content record-select-button"
                   isDisabled={!record.valid}
                   variant="ghost"
                   onPress={() => setSelectedId(record.id)}
@@ -1086,8 +1503,21 @@ function QuickGenerator() {
                     {record.index + 1}
                   </span>
                   <span className="record-text">
-                    <strong title={record.value}>{record.value}</strong>
-                    <small>{record.error || (record.duplicate ? "重复" : "就绪")}</small>
+                    <span className="record-value-line">
+                      <strong title={record.value}>{record.value}</strong>
+                      {excludeDuplicates && mergedCount > 1 && (
+                        <span
+                          className="duplicate-count"
+                          title={`已合并 ${mergedCount} 行相同编号`}
+                        >
+                          ×{mergedCount}
+                        </span>
+                      )}
+                    </span>
+                    <small>
+                      {record.error ||
+                        (record.duplicate && !excludeDuplicates ? "重复" : "就绪")}
+                    </small>
                   </span>
                 </Button>
                 {record.valid && (
@@ -1097,20 +1527,8 @@ function QuickGenerator() {
                     className="record-download-button"
                     size="sm"
                     variant="ghost"
-                    onPress={async () => {
-                      try {
-                        const filename = await downloadRecord(
-                          record,
-                          "png",
-                          settings.exportHeightCm,
-                          settings.exportWidthCm,
-                        );
-                        rememberDownloads([record], "png");
-                        toast.success("已下载", { description: filename });
-                      } catch (error) {
-                        toast.danger("下载失败", { description: error.message });
-                      }
-                    }}
+                    isDisabled={exporting}
+                    onPress={() => exportOne(record)}
                   >
                     <Download size={14} />
                   </Button>
@@ -1118,23 +1536,6 @@ function QuickGenerator() {
               </div>
             );
           })}
-          {recentDownloads.map((item) => (
-            <div
-              className="record-row is-downloaded is-archived-download"
-              key={item.id}
-              style={downloadRecordStyle(item)}
-            >
-              <div className="archived-download-content">
-                <span className="record-index">
-                  <Check aria-hidden="true" size={13} />
-                </span>
-                <span className="record-text">
-                  <strong title={item.value}>{item.value}</strong>
-                  <small>已下载 · {item.format} · {item.downloadedAt}</small>
-                </span>
-              </div>
-            </div>
-          ))}
         </div>
       </Surface>
 
@@ -1164,47 +1565,10 @@ function QuickGenerator() {
             <BarcodePreview
               aspectRatio={settings.exportWidthCm / settings.exportHeightCm}
               record={selectedRecord}
+              stackCount={visibleValidRecords.length}
             />
           </div>
         </div>
-        <footer className="export-bar">
-          {visibleValidRecords.length > 1 && (
-            <Button
-              isDisabled={!downloadableRecords.length}
-              isPending={exporting}
-              size="sm"
-              onPress={() => exportAll()}
-            >
-              <Download size={15} />
-              下载全部 ({downloadableRecords.length})
-            </Button>
-          )}
-          <div className="download-format-actions">
-            <Button
-              isDisabled={!selectedRecord}
-              isPending={exporting}
-              size="sm"
-              variant={visibleValidRecords.length > 1 ? "secondary" : "primary"}
-              onPress={() => exportOne("png")}
-            >
-              <Download size={15} />
-              PNG
-            </Button>
-            <Button
-              isDisabled={!selectedRecord || exporting}
-              size="sm"
-              variant="secondary"
-              onPress={() => exportOne("svg")}
-            >
-              SVG
-            </Button>
-          </div>
-          <span className="shortcut-hint">
-            {enterAction === "download"
-              ? "Enter 下载 · Shift + Enter 换行"
-              : "⌘ / Ctrl + Enter 下载"}
-          </span>
-        </footer>
       </Surface>
 
       <Surface className="dock-panel inspector-dock">
@@ -1214,13 +1578,25 @@ function QuickGenerator() {
         <div className="inspector-scroll">
           <InspectorControls
             clearAfterDownload={clearAfterDownload}
+            downloadFormat={downloadFormat}
             excludeDuplicates={excludeDuplicates}
             settings={settings}
             onClearAfterDownloadChange={setClearAfterDownload}
+            onDownloadFormatChange={setDownloadFormat}
             onExcludeDuplicatesChange={setExcludeDuplicates}
             onSettingsChange={changeSettings}
           />
         </div>
+        <footer className="inspector-download-footer">
+          <DownloadActionButton
+            count={downloadableRecords.length}
+            enterAction={enterAction}
+            exporting={exporting}
+            onPress={() =>
+              downloadableRecords.length > 1 ? exportAll() : exportOne()
+            }
+          />
+        </footer>
       </Surface>
 
       <Drawer.Backdrop isOpen={settingsOpen} onOpenChange={setSettingsOpen}>
@@ -1233,17 +1609,24 @@ function QuickGenerator() {
             <Drawer.Body>
               <InspectorControls
                 clearAfterDownload={clearAfterDownload}
+                downloadFormat={downloadFormat}
                 excludeDuplicates={excludeDuplicates}
                 settings={settings}
                 onClearAfterDownloadChange={setClearAfterDownload}
+                onDownloadFormatChange={setDownloadFormat}
                 onExcludeDuplicatesChange={setExcludeDuplicates}
                 onSettingsChange={changeSettings}
               />
             </Drawer.Body>
-            <Drawer.Footer>
-              <Button fullWidth slot="close">
-                完成
-              </Button>
+            <Drawer.Footer className="inspector-download-footer">
+              <DownloadActionButton
+                count={downloadableRecords.length}
+                enterAction={enterAction}
+                exporting={exporting}
+                onPress={() =>
+                  downloadableRecords.length > 1 ? exportAll() : exportOne()
+                }
+              />
             </Drawer.Footer>
           </Drawer.Dialog>
         </Drawer.Content>
@@ -1390,7 +1773,12 @@ function ExcelImportModal({ isOpen, onLoadValues, onOpenChange }) {
 
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Container placement="center" scroll="inside" size="lg">
+      <Modal.Container
+        className="excel-modal-container"
+        placement="center"
+        scroll="inside"
+        size="cover"
+      >
         <Modal.Dialog className="excel-import-dialog">
           <Modal.CloseTrigger />
           <Modal.Header className="excel-modal-header">
@@ -1432,7 +1820,7 @@ function ExcelImportModal({ isOpen, onLoadValues, onOpenChange }) {
               </div>
             ) : (
               <div className="excel-modal-workspace">
-                <Surface className="dock-panel excel-preview-dock">
+                <section className="excel-preview-pane">
                   <header className="dock-header excel-preview-header">
                     <div className="excel-file-meta">
                       <FileSpreadsheet aria-hidden="true" size={16} />
@@ -1507,9 +1895,20 @@ function ExcelImportModal({ isOpen, onLoadValues, onOpenChange }) {
                       <span>选择 Excel 后显示数据</span>
                     </div>
                   )}
-                </Surface>
+                  <footer className="excel-preview-footer">
+                    <Button
+                      isDisabled={!analysis?.validCount}
+                      size="sm"
+                      variant="primary"
+                      onPress={confirmImport}
+                    >
+                      <Check size={14} />
+                      导入{analysis?.validCount ? ` ${analysis.validCount} 个编号` : ""}
+                    </Button>
+                  </footer>
+                </section>
 
-                <Surface className="dock-panel excel-flow-dock">
+                <aside className="excel-flow-pane excel-flow-dock">
                   <header className="dock-header">
                     <strong>列映射</strong>
                   </header>
@@ -1581,20 +1980,11 @@ function ExcelImportModal({ isOpen, onLoadValues, onOpenChange }) {
                   ) : (
                     <div className="excel-config-empty">等待文件</div>
                   )}
-                </Surface>
+                </aside>
               </div>
             )}
             {fileInput}
           </Modal.Body>
-          <Modal.Footer className="excel-modal-footer">
-            <Button slot="close" variant="secondary">
-              取消
-            </Button>
-            <Button isDisabled={!analysis?.validCount} onPress={confirmImport}>
-              <Check size={15} />
-              导入{analysis?.validCount ? ` ${analysis.validCount} 个编号` : ""}
-            </Button>
-          </Modal.Footer>
         </Modal.Dialog>
       </Modal.Container>
     </Modal.Backdrop>

@@ -157,7 +157,6 @@ button {
 .bar-actions,
 .input-actions,
 .canvas-header > div,
-.export-bar,
 .setting-label {
   display: flex;
   align-items: center;
@@ -221,7 +220,7 @@ button {
   background: var(--app-control);
 }
 
-.theme-tabs {
+.segmented-control {
   min-width: 0;
   padding: 2px;
   flex: 0 0 auto;
@@ -229,8 +228,8 @@ button {
   background: var(--app-control);
 }
 
-.theme-tabs .toggle-button {
-  min-width: 38px;
+.segmented-control .toggle-button {
+  min-width: 0;
   height: 22px;
   min-height: 22px;
   padding: 0 7px;
@@ -251,17 +250,21 @@ button {
   --toggle-button-fg-selected: var(--app-text);
 }
 
-.theme-tabs .toggle-button:first-child,
-.theme-tabs .toggle-button:last-child,
-.theme-tabs .toggle-button:first-child:last-child {
+.segmented-control .toggle-button:first-child,
+.segmented-control .toggle-button:last-child,
+.segmented-control .toggle-button:first-child:last-child {
   border-radius: 3px;
 }
 
-.theme-tabs .toggle-button[data-selected="true"] {
+.segmented-control .toggle-button[data-selected="true"] {
   color: var(--app-text);
   border: 1px solid var(--app-border);
   background: var(--app-panel);
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.06);
+}
+
+.theme-tabs .toggle-button {
+  min-width: 38px;
 }
 
 .offline-indicator {
@@ -379,44 +382,36 @@ button {
   gap: 6px;
 }
 
-.input-edit-actions,
-.download-format-actions,
-.enter-action {
+.input-header-tools {
   display: flex;
   align-items: center;
+  min-width: 0;
+  gap: 2px;
 }
 
-.input-edit-actions {
-  gap: 4px;
+.input-header-tools .button {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
 }
 
-.enter-action {
-  min-height: 28px;
-  padding: 2px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-form-radius);
-  background: var(--app-panel-subtle);
+.input-count {
+  min-width: 24px;
+  margin-right: 2px;
+  text-align: right;
 }
 
-.enter-action .toggle-button-group {
-  height: 22px;
-}
-
-.enter-action .toggle-button {
+.enter-action-control .toggle-button {
   min-width: 58px;
-  height: 22px;
-  min-height: 22px;
-  padding: 0 7px;
-  border-radius: 3px;
-  color: var(--app-muted);
-  background: transparent;
-  font-size: 10px;
 }
 
-.enter-action .toggle-button[data-selected="true"] {
-  color: var(--app-text);
-  background: var(--app-control);
-  box-shadow: inset 0 0 0 1px var(--app-border);
+.enter-action-hint {
+  margin-left: auto;
+  color: var(--app-faint);
+  font-size: 9px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .record-list {
@@ -443,7 +438,7 @@ button {
 .record-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 32px;
   align-items: center;
   min-height: 44px;
   border: 1px solid transparent;
@@ -465,10 +460,17 @@ button {
 }
 
 .record-row.is-downloaded {
+  --download-record-height: 44px;
+  min-height: 0;
+  max-height: var(--download-record-height);
   border-color: color-mix(in srgb, var(--app-success) 32%, var(--app-border));
   background: var(--app-success-soft);
-  animation: download-record-expire 60s linear forwards;
-  animation-delay: var(--download-record-delay, 0ms);
+  animation:
+    download-record-shell-fade var(--download-record-fade-duration, 60s)
+      linear var(--download-record-fade-delay, 0ms) 1 forwards,
+    download-record-collapse var(--download-record-collapse-duration, 320ms)
+      cubic-bezier(0.4, 0, 0.2, 1)
+      var(--download-record-collapse-delay, 60s) 1 forwards;
 }
 
 .record-row.is-downloaded.is-selected {
@@ -476,20 +478,28 @@ button {
   background: var(--app-success-soft);
 }
 
-.record-row > button {
+.record-content {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
+  align-self: stretch;
   min-width: 0;
+  width: 100%;
+  min-height: 42px;
   padding: 5px 6px;
+  gap: 8px;
   border: 0;
   color: inherit;
   text-align: left;
   background: transparent;
+}
+
+.record-select-button {
+  justify-content: stretch;
   cursor: pointer;
 }
 
-.record-row > button:disabled {
+.record-select-button:disabled {
   cursor: default;
 }
 
@@ -512,6 +522,36 @@ button {
   min-width: 0;
   flex-direction: column;
   gap: 1px;
+}
+
+.record-value-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+.record-value-line strong {
+  min-width: 0;
+}
+
+.duplicate-count {
+  padding: 1px 4px;
+  flex: 0 0 auto;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 3px;
+  color: var(--app-muted);
+  background: var(--app-control);
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.is-downloaded .duplicate-count {
+  border-color: color-mix(in srgb, var(--app-success) 35%, var(--app-border));
+  color: var(--app-success);
+  background: color-mix(in srgb, var(--app-success-soft) 72%, transparent);
 }
 
 .record-text strong {
@@ -537,15 +577,22 @@ button {
 }
 
 .archived-download-content {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  min-width: 0;
-  padding: 5px 6px;
-  align-items: center;
+  grid-column: 1;
 }
 
-.is-archived-download {
-  grid-template-columns: minmax(0, 1fr);
+.is-downloaded .archived-download-content,
+.is-downloaded .record-downloaded-indicator {
+  animation: download-record-content-fade
+    var(--download-record-fade-duration, 60s) linear
+    var(--download-record-fade-delay, 0ms) 1 forwards;
+}
+
+.record-downloaded-indicator {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--app-success);
 }
 
 .canvas-dock {
@@ -600,12 +647,12 @@ button {
   contain: layout paint;
 }
 
-.preview-viewport {
+.preview-stack {
+  position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
   place-items: center;
-  overflow: hidden;
   opacity: 0;
   transition:
     width 220ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -613,8 +660,35 @@ button {
     opacity 120ms ease-out;
 }
 
-.preview-viewport[data-ready="true"] {
+.preview-stack[data-ready="true"] {
   opacity: 1;
+}
+
+.preview-stack-card {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--app-border-strong);
+  border-radius: var(--app-form-radius);
+  opacity: calc(0.5 - var(--stack-depth) * 0.1);
+  background: var(--app-panel-subtle);
+  transform: translate(
+    calc(var(--stack-depth) * 6px),
+    calc(var(--stack-depth) * 7px)
+  );
+  pointer-events: none;
+}
+
+.preview-viewport {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--app-form-radius);
 }
 
 .preview-empty {
@@ -654,47 +728,45 @@ button {
 .preview-content {
   grid-area: 1 / 1;
   transform-origin: center;
-  will-change: opacity, transform;
+  will-change: opacity;
 }
 
-.preview-content.is-entering {
+.preview-content.is-current {
   z-index: 2;
-  animation: barcode-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.preview-content.is-leaving {
+.preview-content.is-base {
   z-index: 1;
   pointer-events: none;
-  animation: barcode-exit 220ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+.preview-content.is-revealing {
+  z-index: 2;
+  animation: barcode-crossfade 360ms ease-out both;
 }
 
 .barcode-svg {
   overflow: hidden;
+  border-radius: var(--app-form-radius);
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(45deg, #e4e4e7 25%, transparent 25%),
+    linear-gradient(-45deg, #e4e4e7 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e4e4e7 75%),
+    linear-gradient(-45deg, transparent 75%, #e4e4e7 75%);
+  background-position:
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
+  background-size: 8px 8px;
 }
 
 .barcode-svg svg {
   display: block;
   width: 100%;
   height: 100%;
-}
-
-.export-bar {
-  min-height: 47px;
-  padding: 6px 8px;
-  flex: 0 0 auto;
-  gap: 10px;
-  border-top: 1px solid var(--app-border);
-  background: var(--app-panel);
-}
-
-.download-format-actions {
-  gap: 6px;
-}
-
-.export-bar .shortcut-hint {
-  margin-left: auto;
-  color: var(--app-faint);
-  font-size: 10px;
+  border-radius: inherit;
 }
 
 .inspector-scroll {
@@ -716,6 +788,29 @@ button {
   padding: 12px;
   gap: 12px;
   border-bottom: 1px solid var(--app-border);
+}
+
+.inspector-section--appearance {
+  padding: 0;
+  gap: 0;
+}
+
+.inspector-group {
+  display: grid;
+  padding: 10px 12px 12px;
+  gap: 10px;
+}
+
+.inspector-group + .inspector-group {
+  border-top: 1px solid var(--app-border);
+}
+
+.inspector-group-label {
+  color: var(--app-faint);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  line-height: 1;
 }
 
 .setting-control {
@@ -779,7 +874,7 @@ button {
 }
 
 .compact-number-field,
-.compact-color-field,
+.compact-color-picker,
 .compact-select {
   min-width: 0;
   width: 100%;
@@ -811,22 +906,98 @@ button {
   font-size: 9px;
 }
 
-.compact-color-field [data-slot="color-input-group"] {
+.compact-color-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  height: 30px;
+  min-height: 30px;
+  padding: 3px 6px 3px 3px;
+  gap: 6px;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-form-radius);
+  color: var(--app-text);
+  background: var(--app-control);
+}
+
+.compact-color-trigger:disabled,
+.compact-color-trigger[data-disabled="true"] {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.compact-color-trigger [data-slot="color-swatch"] {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+}
+
+.compact-color-value {
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.compact-color-alpha {
+  margin-left: auto;
+  color: var(--app-faint);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.compact-color-popover {
+  width: 224px;
+  padding: 8px;
+  gap: 8px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: var(--app-radius);
+  color: var(--app-text);
+  background: var(--app-panel);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+}
+
+.compact-color-area {
+  width: 100%;
+  height: 128px;
+  border-radius: var(--app-form-radius);
+}
+
+.compact-color-slider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  color: var(--app-muted);
+  font-size: 9px;
+}
+
+.compact-color-slider [data-slot="color-slider-track"] {
+  grid-column: 1 / -1;
+  height: 14px;
+  border-radius: var(--app-form-radius);
+}
+
+.compact-color-slider [data-slot="color-slider-thumb"] {
+  width: 14px;
+  height: 14px;
+}
+
+.compact-color-popover [data-slot="color-input-group"] {
   width: 100%;
   height: 30px;
 }
 
-.compact-color-field [data-slot="color-input-group-prefix"] {
+.compact-color-popover [data-slot="color-input-group-prefix"] {
   padding-left: 3px;
 }
 
-.compact-color-field [data-slot="color-swatch"] {
-  width: 22px;
-  height: 22px;
-  border-radius: 2px;
-}
-
-.compact-color-field [data-slot="color-input-group-input"] {
+.compact-color-popover [data-slot="color-input-group-input"] {
   min-width: 0;
   padding: 0 5px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -839,6 +1010,34 @@ button {
   gap: 10px;
   color: var(--app-text);
   font-size: var(--app-font-caption);
+}
+
+.inspector-download-footer {
+  display: flex;
+  min-height: 50px;
+  padding: 8px;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-panel);
+}
+
+.inspector-download-button {
+  justify-content: flex-start;
+  min-height: 34px;
+  padding-inline: 10px;
+  gap: 7px;
+}
+
+.inspector-download-button kbd {
+  margin-left: auto;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 520;
+  line-height: 1.2;
+  opacity: 0.72;
 }
 
 .inspector-section .switch__content,
@@ -876,21 +1075,32 @@ button {
     background-color 140ms ease;
 }
 
+.excel-modal-container {
+  width: 100%;
+  height: 100dvh;
+  padding: 0;
+}
+
 .excel-import-dialog {
-  width: min(960px, calc(100vw - 32px));
-  max-width: 960px;
-  height: min(680px, calc(100dvh - 32px));
-  max-height: 680px;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  padding: 0;
   overflow: hidden;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius);
+  border: 0;
+  border-radius: 0;
   color: var(--app-text);
   background: var(--app-panel);
 }
 
 .excel-modal-header {
+  display: flex;
+  align-items: center;
   min-height: 48px;
   padding: 10px 14px;
+  flex-direction: row;
+  gap: 8px;
   border-bottom: 1px solid var(--app-border);
 }
 
@@ -901,10 +1111,14 @@ button {
 }
 
 .excel-modal-body {
+  display: flex;
+  width: 100%;
   min-height: 0;
-  padding: 8px;
+  margin: 0;
+  padding: 0;
+  flex: 1;
   overflow: hidden;
-  background: var(--app-bg);
+  background: var(--app-panel);
 }
 
 .excel-modal-workspace {
@@ -914,7 +1128,20 @@ button {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  gap: 8px;
+  gap: 0;
+}
+
+.excel-preview-pane,
+.excel-flow-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.excel-flow-pane {
+  border-left: 1px solid var(--app-border);
 }
 
 .excel-modal-dropzone {
@@ -927,9 +1154,13 @@ button {
   color: var(--app-text);
 }
 
-.excel-modal-footer {
+.excel-preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   min-height: 50px;
-  padding: 8px 14px;
+  padding: 8px;
+  flex: 0 0 auto;
   border-top: 1px solid var(--app-border);
   background: var(--app-panel);
 }
@@ -1299,23 +1530,6 @@ button {
   max-width: min(360px, 92vw);
 }
 
-.update-banner {
-  position: fixed;
-  z-index: 100;
-  right: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  display: flex;
-  align-items: center;
-  padding: 6px;
-  gap: 8px;
-  border: 1px solid var(--app-border-strong);
-  border-radius: var(--app-radius);
-  color: var(--app-text);
-  background: var(--app-panel);
-  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.14);
-  font-size: 11px;
-}
-
 .toast-region--bottom {
   bottom: calc(60px + env(safe-area-inset-bottom));
 }
@@ -1343,33 +1557,43 @@ button {
   border-radius: 4px;
 }
 
-@keyframes barcode-enter {
+@keyframes barcode-crossfade {
   from {
     opacity: 0;
-    transform: scale(0.992);
   }
   to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 
-@keyframes barcode-exit {
+@keyframes download-record-shell-fade {
   from {
-    opacity: 1;
-    transform: scale(1);
+    border-color: color-mix(in srgb, var(--app-success) 32%, var(--app-border));
+    background-color: var(--app-success-soft);
   }
   to {
-    opacity: 0;
-    transform: scale(1.006);
+    border-color: color-mix(in srgb, var(--app-success) 24%, transparent);
+    background-color: transparent;
   }
 }
 
-@keyframes download-record-expire {
+@keyframes download-record-content-fade {
   from {
     opacity: 1;
   }
   to {
+    opacity: 0;
+  }
+}
+
+@keyframes download-record-collapse {
+  from {
+    max-height: var(--download-record-height);
+    opacity: 1;
+  }
+  to {
+    max-height: 0;
+    border-width: 0;
     opacity: 0;
   }
 }
@@ -1413,7 +1637,6 @@ button {
   .theme-tabs .toggle-button {
     min-width: 34px;
     padding-inline: 5px;
-    font-size: 9px;
   }
 
   .app-stage {
@@ -1452,6 +1675,14 @@ button {
     min-height: 39px;
   }
 
+  .record-row.is-downloaded {
+    --download-record-height: 39px;
+  }
+
+  .record-content {
+    min-height: 37px;
+  }
+
   .canvas-stage {
     padding: 10px;
   }
@@ -1469,29 +1700,29 @@ button {
     height: 46px;
   }
 
-  .export-bar {
-    min-height: 43px;
-    padding: 5px 6px;
-  }
-
-  .shortcut-hint {
-    display: none;
-  }
-
   .excel-import-dialog {
-    width: calc(100vw - 12px);
-    height: calc(100dvh - 12px);
+    width: 100%;
+    height: 100%;
     max-height: none;
   }
 
+  .excel-modal-container {
+    padding: 0;
+  }
+
   .excel-modal-body {
-    padding: 6px;
+    padding: 0;
   }
 
   .excel-modal-workspace {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(210px, 52%) minmax(188px, 48%);
-    gap: 6px;
+    gap: 0;
+  }
+
+  .excel-flow-pane {
+    border-top: 1px solid var(--app-border);
+    border-left: 0;
   }
 
   .excel-modal-dropzone {
@@ -1549,11 +1780,6 @@ button {
     grid-column: 1 / -1;
   }
 
-  .update-banner {
-    right: max(6px, env(safe-area-inset-right));
-    bottom: calc(6px + env(safe-area-inset-bottom));
-    left: max(6px, env(safe-area-inset-left));
-  }
 }
 
 @media (max-width: 390px) {
@@ -1562,9 +1788,6 @@ button {
     padding-inline: 4px;
   }
 
-  .export-bar .button {
-    padding-inline: 9px;
-  }
 }
 
 @media (max-height: 620px) and (max-width: 720px) {
@@ -1590,7 +1813,18 @@ button {
   }
 
   .record-row.is-downloaded {
-    animation: download-record-expire 60s linear
-      var(--download-record-delay, 0ms) 1 forwards !important;
+    animation:
+      download-record-shell-fade var(--download-record-fade-duration, 60s)
+        linear var(--download-record-fade-delay, 0ms) 1 forwards,
+      download-record-collapse var(--download-record-collapse-duration, 320ms)
+        cubic-bezier(0.4, 0, 0.2, 1)
+        var(--download-record-collapse-delay, 60s) 1 forwards !important;
+  }
+
+  .record-row.is-downloaded .archived-download-content,
+  .record-row.is-downloaded .record-downloaded-indicator {
+    animation: download-record-content-fade
+      var(--download-record-fade-duration, 60s) linear
+      var(--download-record-fade-delay, 0ms) 1 forwards !important;
   }
 }
