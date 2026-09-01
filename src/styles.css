@@ -415,13 +415,16 @@ button {
 }
 
 .record-list {
-  display: grid;
+  display: flex;
   min-height: 0;
   padding: 4px;
   flex: 1;
-  align-content: start;
-  overflow: auto;
+  align-items: stretch;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
   gap: 2px;
+  overscroll-behavior: contain;
   scrollbar-color: var(--app-border-strong) transparent;
   scrollbar-width: thin;
 }
@@ -441,6 +444,7 @@ button {
   grid-template-columns: minmax(0, 1fr) 32px;
   align-items: center;
   min-height: 44px;
+  flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: var(--app-form-radius);
   overflow: hidden;
@@ -461,15 +465,16 @@ button {
 
 .record-row.is-downloaded {
   --download-record-height: 44px;
-  min-height: 0;
+  height: var(--download-record-height);
+  min-height: var(--download-record-height);
   max-height: var(--download-record-height);
   border-color: color-mix(in srgb, var(--app-success) 32%, var(--app-border));
   background: var(--app-success-soft);
   animation:
     download-record-shell-fade var(--download-record-fade-duration, 60s)
       linear var(--download-record-fade-delay, 0ms) 1 forwards,
-    download-record-collapse var(--download-record-collapse-duration, 320ms)
-      cubic-bezier(0.4, 0, 0.2, 1)
+    download-record-collapse var(--download-record-collapse-duration, 5s)
+      ease-in-out
       var(--download-record-collapse-delay, 60s) 1 forwards;
 }
 
@@ -669,12 +674,9 @@ button {
   inset: 0;
   border: 1px solid var(--app-border-strong);
   border-radius: var(--app-form-radius);
-  opacity: calc(0.5 - var(--stack-depth) * 0.1);
-  background: var(--app-panel-subtle);
-  transform: translate(
-    calc(var(--stack-depth) * 6px),
-    calc(var(--stack-depth) * 7px)
-  );
+  opacity: 1;
+  background: var(--preview-stack-background, #ffffff);
+  transform: translateY(calc(var(--stack-depth) * -7px));
   pointer-events: none;
 }
 
@@ -691,13 +693,25 @@ button {
   border-radius: var(--app-form-radius);
 }
 
+.preview-stack[data-count="0"] .preview-viewport {
+  border: 1px solid var(--app-border-strong);
+  background: var(--preview-stack-background, #ffffff);
+}
+
 .preview-empty {
   display: flex;
   grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
   align-items: center;
+  justify-content: center;
   flex-direction: column;
-  gap: 14px;
-  color: #a1a1aa;
+  gap: clamp(6px, 4%, 14px);
+  color: color-mix(
+    in srgb,
+    var(--preview-stack-line, #18181b) 48%,
+    transparent
+  );
   font-size: 11px;
 }
 
@@ -705,15 +719,15 @@ button {
   display: flex;
   align-items: stretch;
   justify-content: center;
-  width: min(220px, 55vw);
-  height: 64px;
+  width: min(72%, 220px);
+  height: min(45%, 64px);
   gap: 4px;
-  opacity: 0.13;
+  opacity: 0.28;
 }
 
 .empty-barcode i {
   height: 100%;
-  background: #18181b;
+  background: var(--preview-stack-line, #18181b);
 }
 
 .preview-content,
@@ -953,6 +967,7 @@ button {
 }
 
 .compact-color-popover {
+  box-sizing: border-box;
   width: 224px;
   padding: 8px;
   gap: 8px;
@@ -979,7 +994,10 @@ button {
 
 .compact-color-slider [data-slot="color-slider-track"] {
   grid-column: 1 / -1;
+  width: calc(100% - 14px);
   height: 14px;
+  margin-inline: 7px;
+  overflow: visible;
   border-radius: var(--app-form-radius);
 }
 
@@ -1638,10 +1656,14 @@ button {
 
 @keyframes download-record-collapse {
   from {
+    height: var(--download-record-height);
+    min-height: var(--download-record-height);
     max-height: var(--download-record-height);
     opacity: 1;
   }
   to {
+    height: 0;
+    min-height: 0;
     max-height: 0;
     border-width: 0;
     opacity: 0;
@@ -1902,8 +1924,8 @@ button {
     animation:
       download-record-shell-fade var(--download-record-fade-duration, 60s)
         linear var(--download-record-fade-delay, 0ms) 1 forwards,
-      download-record-collapse var(--download-record-collapse-duration, 320ms)
-        cubic-bezier(0.4, 0, 0.2, 1)
+      download-record-collapse var(--download-record-collapse-duration, 5s)
+        ease-in-out
         var(--download-record-collapse-delay, 60s) 1 forwards !important;
   }
 

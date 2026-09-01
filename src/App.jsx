@@ -30,6 +30,7 @@ import {
   FileSpreadsheet,
   HelpCircle,
   LoaderCircle,
+  MonitorDown,
   Settings2,
   Share2,
   Smartphone,
@@ -61,7 +62,7 @@ const THEME_ORDER = ["system", "light", "dark"];
 const ENTER_ACTIONS = ["newline", "download"];
 const DOWNLOAD_FORMATS = ["png", "svg"];
 const DOWNLOAD_RECORD_TTL = 60_000;
-const DOWNLOAD_RECORD_COLLAPSE_DURATION = 320;
+const DOWNLOAD_RECORD_COLLAPSE_DURATION = 5_000;
 const DOWNLOAD_RECORD_REMOVE_GRACE = DOWNLOAD_RECORD_COLLAPSE_DURATION + 80;
 const PREVIEW_SETTLE_DELAY = 160;
 const PREVIEW_TRANSITION_DURATION = 360;
@@ -69,6 +70,8 @@ const PWA_UPDATE_INTERVAL = 15 * 60_000;
 const INPUT_DRAFT_KEY = "barcode-input-draft-v1";
 const RECENT_DOWNLOADS_KEY = "barcode-recent-downloads-v1";
 const PREFERENCES_KEY = "barcode-workbench-preferences-v1";
+const WINDOWS_PORTABLE_URL =
+  "https://github.com/wyfang/barcode/releases/latest/download/barcode-windows-x64.exe";
 
 function createRecordInstanceId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -453,6 +456,29 @@ function InstallAppButton() {
   );
 }
 
+function WindowsDownloadButton() {
+  return (
+    <Button
+      isIconOnly
+      aria-label="下载 Windows 绿色版"
+      className="bar-action"
+      render={(props) => (
+        <a
+          {...props}
+          href={WINDOWS_PORTABLE_URL}
+          rel="noreferrer"
+          target="_blank"
+        />
+      )}
+      size="sm"
+      title="下载 Windows 绿色版"
+      variant="tertiary"
+    >
+      <MonitorDown aria-hidden="true" size={16} />
+    </Button>
+  );
+}
+
 function PwaLifecycle() {
   const {
     needRefresh: [needRefresh],
@@ -682,7 +708,13 @@ function usePreviewViewport(aspectRatio) {
   return { containerRef, size };
 }
 
-function BarcodePreview({ aspectRatio, record, stackCount = 0 }) {
+function BarcodePreview({
+  aspectRatio,
+  background,
+  lineColor,
+  record,
+  stackCount = 0,
+}) {
   const layers = usePreviewLayers(record);
   const normalizedAspectRatio = boundedNumber(aspectRatio, 0.3, 20, 2);
   const { containerRef, size } = usePreviewViewport(normalizedAspectRatio);
@@ -696,7 +728,11 @@ function BarcodePreview({ aspectRatio, record, stackCount = 0 }) {
         className="preview-stack"
         data-count={backLayerCount + (record ? 1 : 0)}
         data-ready={size ? "true" : "false"}
-        style={size ? { height: size.height, width: size.width } : undefined}
+        style={{
+          "--preview-stack-background": background,
+          "--preview-stack-line": lineColor,
+          ...(size ? { height: size.height, width: size.width } : {}),
+        }}
       >
         {Array.from({ length: backLayerCount }, (_, index) => {
           const depth = backLayerCount - index;
@@ -824,7 +860,7 @@ function ColorSetting({
       </ColorPicker.Trigger>
       <ColorPicker.Popover
         className="compact-color-popover"
-        placement="left top"
+        placement="bottom end"
       >
         <ColorArea
           aria-label={`${ariaLabel}色彩区域`}
@@ -1172,18 +1208,49 @@ function QuickGenerator() {
       return [{ download, key: `record:${record.id}`, record }];
     });
 
+    const queuedDownloads = [];
     for (const download of recentDownloads) {
       if (excludeDuplicates && renderedValues.has(download.value)) continue;
       if (!inlineDownloadIds.has(download.id)) {
         renderedValues.add(download.value);
-        rows.push({
+        queuedDownloads.push({
           download,
           key: `download:${download.id}`,
           record: null,
         });
       }
     }
-    return rows;
+
+    queuedDownloads
+      .sort((first, second) => {
+        const firstPosition = Number.isFinite(first.download.listPosition)
+          ? first.download.listPosition
+          : Number.MAX_SAFE_INTEGER;
+        const secondPosition = Number.isFinite(second.download.listPosition)
+          ? second.download.listPosition
+          : Number.MAX_SAFE_INTEGER;
+        return firstPosition - secondPosition;
+      })
+      .forEach((row) => {
+        const requestedPosition = Number.isFinite(row.download.listPosition)
+          ? Math.round(row.download.listPosition)
+          : rows.length;
+        const position = Math.min(rows.length, Math.max(0, requestedPosition));
+        rows.splice(position, 0, row);
+      });
+    const indexSnapshot = recentDownloads.find(
+      (item) =>
+        Array.isArray(item.listIndexes) && item.listIndexes.length === rows.length,
+    )?.listIndexes;
+    return rows.map((row, position) => {
+      const fallbackIndex = row.record?.index ?? downloadRecordIndex(row.download);
+      return {
+        ...row,
+        displayIndex: Number.isFinite(indexSnapshot?.[position])
+          ? indexSnapshot[position]
+          : fallbackIndex,
+      };
+    });
   }, [displayRecords, excludeDuplicates, hiddenDownloadedIds, recentDownloads]);
   const selectedRecord =
     visibleValidRecords.find((record) => record.id === selectedId) ||
@@ -1235,15 +1302,20 @@ function QuickGenerator() {
       hour12: false,
       minute: "2-digit",
     });
-    const entries = downloadedRecords
-      .slice()
-      .reverse()
-      .map((record) => ({
+    const listPositionByRecordId = new Map();
+    recordRows.forEach((row, position) => {
+      if (row.record) listPositionByRecordId.set(row.record.id, position);
+    });
+    const listIndexes = recordRows.map((row) => row.displayIndex);
+    const entries = downloadedRecords.map((record, entryIndex) => ({
         downloadedAt,
         downloadedAtMs,
         expiresAt: downloadedAtMs + DOWNLOAD_RECORD_TTL,
         format: format.toUpperCase(),
         id: createRecordInstanceId(),
+        ...(entryIndex === 0 ? { listIndexes } : {}),
+        listPosition:
+          listPositionByRecordId.get(record.id) ?? recordRows.length,
         mergedCount: excludeDuplicates
           ? valueCounts.get(record.value) || 1
           : 1,
@@ -1447,9 +1519,8 @@ function QuickGenerator() {
               {records.length ? "已全部处理" : "等待编号"}
             </span>
           )}
-          {recordRows.map(({ download, key, record }) => {
+          {recordRows.map(({ displayIndex, download, key, record }) => {
             if (download) {
-              const recordIndex = record?.index ?? downloadRecordIndex(download);
               const mergedCount = Math.max(
                 1,
                 download.mergedCount || valueCounts.get(download.value) || 1,
@@ -1462,7 +1533,7 @@ function QuickGenerator() {
                 >
                   <div className="record-content archived-download-content">
                     <span className="record-index">
-                      {recordIndex === null ? "—" : recordIndex + 1}
+                      {displayIndex === null ? "—" : displayIndex + 1}
                     </span>
                     <span className="record-text">
                       <span className="record-value-line">
@@ -1501,7 +1572,7 @@ function QuickGenerator() {
                   onPress={() => setSelectedId(record.id)}
                 >
                   <span className="record-index">
-                    {record.index + 1}
+                    {displayIndex + 1}
                   </span>
                   <span className="record-text">
                     <span className="record-value-line">
@@ -1555,6 +1626,8 @@ function QuickGenerator() {
           <div className="preview-paper">
             <BarcodePreview
               aspectRatio={settings.exportWidthCm / settings.exportHeightCm}
+              background={settings.background}
+              lineColor={settings.lineColor}
               record={selectedRecord}
               stackCount={visibleValidRecords.length}
             />
@@ -2037,6 +2110,7 @@ export default function App() {
             </span>
           )}
           <InstallAppButton />
+          <WindowsDownloadButton />
           <Button
             isIconOnly
             aria-label="使用说明"

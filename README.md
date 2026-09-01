@@ -12,6 +12,7 @@
 - 条码宽高、文字、颜色和下载行为保存在浏览器本地。
 - 支持亮色、暗色和跟随系统主题。
 - 支持 iOS、Android 和桌面浏览器安装为 PWA，并可离线使用。
+- 提供 Windows 10 及以上系统的单文件绿色版，无需安装即可离线运行。
 
 ## 使用
 
@@ -29,6 +30,23 @@ npm run build
 ```
 
 构建产物位于 `dist/`，资源路径固定为 `/barcode/`。
+
+Windows 10 及以上系统可从顶部栏下载绿色版，也可以直接前往
+[GitHub Releases](https://github.com/wyfang/barcode/releases/latest/download/barcode-windows-x64.exe)。
+绿色版由 GitHub Actions 在 Windows 环境编译，不写入安装目录；当前未进行代码签名，
+首次运行时 Windows 可能显示 SmartScreen 提示。
+
+本地调试桌面版：
+
+```bash
+npm run desktop
+```
+
+Windows 绿色版构建：
+
+```bash
+npm run package:win
+```
 
 ## 数据与部署
 
