@@ -715,6 +715,40 @@ function usePreviewViewport(aspectRatio) {
   return { containerRef, size };
 }
 
+function scaledSvgCornerRadius(svgMarkup, size) {
+  if (!svgMarkup || !size) return null;
+
+  const svg = new DOMParser().parseFromString(
+    svgMarkup,
+    "image/svg+xml",
+  ).documentElement;
+  if (svg.localName !== "svg") return null;
+
+  const viewBox = (svg.getAttribute("viewBox") || "")
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  const backgroundRect = svg.querySelector(":scope > rect");
+  const radiusX = Number.parseFloat(backgroundRect?.getAttribute("rx"));
+  const radiusY = Number.parseFloat(
+    backgroundRect?.getAttribute("ry") || backgroundRect?.getAttribute("rx"),
+  );
+  const sourceWidth = viewBox[2];
+  const sourceHeight = viewBox[3];
+
+  if (
+    viewBox.length !== 4 ||
+    !Number.isFinite(radiusX) ||
+    !Number.isFinite(radiusY) ||
+    !(sourceWidth > 0) ||
+    !(sourceHeight > 0)
+  ) {
+    return null;
+  }
+
+  return `${(radiusX * size.width) / sourceWidth}px / ${(radiusY * size.height) / sourceHeight}px`;
+}
+
 function BarcodePreview({
   aspectRatio,
   background,
@@ -725,6 +759,10 @@ function BarcodePreview({
   const layers = usePreviewLayers(record);
   const normalizedAspectRatio = boundedNumber(aspectRatio, 0.3, 20, 2);
   const { containerRef, size } = usePreviewViewport(normalizedAspectRatio);
+  const previewCornerRadius = useMemo(
+    () => scaledSvgCornerRadius(layers.current?.svg, size),
+    [layers.current?.svg, size],
+  );
   const backLayerCount = record
     ? Math.max(0, Math.min(4, stackCount) - 1)
     : 0;
@@ -738,6 +776,9 @@ function BarcodePreview({
         data-ready={size ? "true" : "false"}
         style={{
           "--preview-stack-background": background,
+          ...(previewCornerRadius
+            ? { "--preview-card-radius": previewCornerRadius }
+            : {}),
           "--preview-stack-line": lineColor,
           ...(size ? { height: size.height, width: size.width } : {}),
         }}

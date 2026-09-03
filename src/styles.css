@@ -674,11 +674,11 @@ button {
 .preview-stack-card,
 .preview-viewport {
   border: 0;
+  border-radius: var(--preview-card-radius, var(--app-form-radius));
 }
 
 .preview-stack-card {
   position: absolute;
-  border-radius: var(--app-form-radius);
   background: color-mix(
     in srgb,
     var(--preview-stack-background, #ffffff)
@@ -737,7 +737,6 @@ button {
   min-height: 0;
   place-items: center;
   overflow: visible;
-  border-radius: var(--app-form-radius);
   box-shadow: 0 0 18px rgb(0 0 0 / 20%);
 }
 
