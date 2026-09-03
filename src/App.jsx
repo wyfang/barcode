@@ -64,8 +64,8 @@ const DOWNLOAD_FORMATS = ["png", "svg"];
 const DOWNLOAD_RECORD_TTL = 60_000;
 const DOWNLOAD_RECORD_COLLAPSE_DURATION = 5_000;
 const DOWNLOAD_RECORD_REMOVE_GRACE = DOWNLOAD_RECORD_COLLAPSE_DURATION + 80;
-const PREVIEW_SETTLE_DELAY = 160;
 const PREVIEW_TRANSITION_DURATION = 360;
+const PREVIEW_STACK_BACKGROUND_MIXES = ["70%", "40%", "20%"];
 const PWA_UPDATE_INTERVAL = 15 * 60_000;
 const INPUT_DRAFT_KEY = "barcode-input-draft-v1";
 const RECENT_DOWNLOADS_KEY = "barcode-recent-downloads-v1";
@@ -628,18 +628,22 @@ function HelpDrawer({ isOpen, onOpenChange }) {
 
 function usePreviewLayers(record) {
   const signature = record?.svg || "";
-  const [layers, setLayers] = useState({ current: record, previous: null });
-
-  useEffect(() => {
-    const delay = record ? PREVIEW_SETTLE_DELAY : 0;
-    const timeoutId = window.setTimeout(() => {
-      setLayers((current) => {
-        if ((current.current?.svg || "") === signature) return current;
-        return { current: record, previous: current.current };
-      });
-    }, delay);
-
-    return () => window.clearTimeout(timeoutId);
+  const [layers, setLayers] = useState({
+    current: record,
+    direction: "idle",
+    previous: null,
+  });
+  useLayoutEffect(() => {
+    setLayers((current) => {
+      if ((current.current?.svg || "") === signature) return current;
+      const previous = current.current;
+      if (!previous || !record || previous.index === record.index) {
+        return { current: record, direction: "idle", previous: null };
+      }
+      const direction =
+        record.index > previous.index ? "forward" : "backward";
+      return { current: record, direction, previous };
+    });
   }, [record, signature]);
 
   useEffect(() => {
@@ -653,11 +657,14 @@ function usePreviewLayers(record) {
   return layers;
 }
 
-function PreviewBarcodeLayer({ className, record }) {
+function PreviewBarcodeLayer({ className, direction, record }) {
   if (!record) return null;
 
   return (
-    <div className={`preview-content ${className}`}>
+    <div
+      className={`preview-content ${className}`}
+      data-direction={direction}
+    >
       <div
         className="barcode-svg"
         aria-label={`条码预览：${record.value}`}
@@ -727,6 +734,7 @@ function BarcodePreview({
       <div
         className="preview-stack"
         data-count={backLayerCount + (record ? 1 : 0)}
+        data-direction={layers.previous ? layers.direction : "idle"}
         data-ready={size ? "true" : "false"}
         style={{
           "--preview-stack-background": background,
@@ -740,8 +748,13 @@ function BarcodePreview({
             <span
               aria-hidden="true"
               className="preview-stack-card"
-              key={`stack-${depth}`}
-              style={{ "--stack-depth": depth }}
+              data-depth={depth}
+              key={`${layers.current?.id || "empty"}-stack-${depth}`}
+              style={{
+                "--stack-background-mix":
+                  PREVIEW_STACK_BACKGROUND_MIXES[depth - 1],
+                "--stack-delay": `${(depth - 1) * 18}ms`,
+              }}
             />
           );
         })}
@@ -749,6 +762,7 @@ function BarcodePreview({
           {layers.previous && (
             <PreviewBarcodeLayer
               className="is-base"
+              direction={layers.direction}
               key={`previous-${layers.previous.svg}`}
               record={layers.previous}
             />
@@ -756,6 +770,7 @@ function BarcodePreview({
           {layers.current ? (
             <PreviewBarcodeLayer
               className={layers.previous ? "is-revealing" : "is-current"}
+              direction={layers.direction}
               key={`current-${layers.current.svg}`}
               record={layers.current}
             />
@@ -1566,6 +1581,7 @@ function QuickGenerator() {
                 key={key}
               >
                 <Button
+                  aria-pressed={selectedRecord?.id === record.id}
                   className="record-content record-select-button"
                   isDisabled={!record.valid}
                   variant="ghost"

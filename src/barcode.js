@@ -50,13 +50,10 @@ function fittedTextSize(value, desiredSize, availableWidth) {
   return Math.max(0.5, (desiredSize * availableWidth) / measuredWidth);
 }
 
-function appendBarcodeText(svg, value, settings, sourceWidth) {
+function appendBarcodeText(svg, value, settings, sourceWidth, fontSize) {
   if (!settings.displayValue) return;
 
   const margin = Number(settings.margin);
-  const desiredSize = Number(settings.fontSize);
-  const availableWidth = Math.max(1, sourceWidth - margin * 2);
-  const fontSize = fittedTextSize(value, desiredSize, availableWidth);
   const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
   text.setAttribute("x", String(sourceWidth / 2));
   text.setAttribute(
@@ -72,25 +69,62 @@ function appendBarcodeText(svg, value, settings, sourceWidth) {
   svg.appendChild(text);
 }
 
+function fittedBarcodeLayout(value, settings, baseSourceHeight) {
+  const aspectRatio =
+    normalizeExportWidthCm(settings.exportWidthCm) /
+    normalizeExportHeightCm(settings.exportHeightCm);
+  const margin = Number(settings.margin);
+  const desiredSize = Number(settings.fontSize);
+  let fontSize = settings.displayValue ? desiredSize : 0;
+
+  for (let iteration = 0; iteration < 12; iteration += 1) {
+    const sourceHeight =
+      baseSourceHeight +
+      (settings.displayValue ? BARCODE_TEXT_MARGIN + fontSize : 0);
+    const sourceWidth = aspectRatio * sourceHeight;
+    const nextFontSize = settings.displayValue
+      ? fittedTextSize(value, desiredSize, Math.max(1, sourceWidth - margin * 2))
+      : 0;
+
+    if (Math.abs(nextFontSize - fontSize) < 0.001) {
+      const fittedSourceHeight =
+        baseSourceHeight +
+        (settings.displayValue ? BARCODE_TEXT_MARGIN + nextFontSize : 0);
+      return {
+        fontSize: nextFontSize,
+        sourceHeight: fittedSourceHeight,
+        sourceWidth: aspectRatio * fittedSourceHeight,
+      };
+    }
+    fontSize = nextFontSize;
+  }
+
+  const sourceHeight =
+    baseSourceHeight +
+    (settings.displayValue ? BARCODE_TEXT_MARGIN + fontSize : 0);
+  return {
+    fontSize,
+    sourceHeight,
+    sourceWidth: aspectRatio * sourceHeight,
+  };
+}
+
 function createSvgElement(value, settings = DEFAULT_SETTINGS) {
-  const heightProbe = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   const firstProbe = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   const secondProbe = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  JsBarcode(heightProbe, value, barcodeOptions(settings, 1));
   JsBarcode(firstProbe, value, barcodeOptions(settings, 1, false));
   JsBarcode(secondProbe, value, barcodeOptions(settings, 2, false));
-  const sourceHeight = Number.parseFloat(heightProbe.getAttribute("height"));
+  const baseSourceHeight = Number.parseFloat(firstProbe.getAttribute("height"));
   const firstWidth = Number.parseFloat(firstProbe.getAttribute("width"));
   const secondWidth = Number.parseFloat(secondProbe.getAttribute("width"));
   const widthPerUnit = secondWidth - firstWidth;
-  if (!(sourceHeight > 0) || !(firstWidth > 0) || !(widthPerUnit > 0)) {
+  if (!(baseSourceHeight > 0) || !(firstWidth > 0) || !(widthPerUnit > 0)) {
     throw new Error("无法读取条码尺寸");
   }
 
-  const exportWidthCm = normalizeExportWidthCm(settings.exportWidthCm);
-  const exportHeightCm = normalizeExportHeightCm(settings.exportHeightCm);
+  const layout = fittedBarcodeLayout(value, settings, baseSourceHeight);
+  const { fontSize, sourceHeight, sourceWidth: targetSourceWidth } = layout;
   const fixedWidth = firstWidth - widthPerUnit;
-  const targetSourceWidth = (exportWidthCm / exportHeightCm) * sourceHeight;
   const sourceBarWidth = Math.max(
     0.001,
     (targetSourceWidth - fixedWidth) / widthPerUnit,
@@ -113,9 +147,8 @@ function createSvgElement(value, settings = DEFAULT_SETTINGS) {
     backgroundRect.setAttribute("rx", String(radius));
     backgroundRect.setAttribute("ry", String(radius));
     svg.style.borderRadius = `${radius}px`;
-    svg.style.overflow = "hidden";
   }
-  appendBarcodeText(svg, value, settings, targetSourceWidth);
+  appendBarcodeText(svg, value, settings, targetSourceWidth, fontSize);
   svg.setAttribute("viewBox", `0 0 ${targetSourceWidth} ${sourceHeight}`);
   svg.setAttribute("width", `${targetSourceWidth}px`);
   svg.setAttribute("height", `${sourceHeight}px`);
